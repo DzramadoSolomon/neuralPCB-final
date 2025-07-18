@@ -1,8 +1,3 @@
-Here's a complete and professional `README.md` file for your **PCB Defect Detector** project. It explains setup, usage, architecture, and deployment on Vercel and Render:
-
----
-
-```markdown
 # 🧠 Neural PCB Defect Detector
 
 An AI-powered web application for detecting six types of PCB (Printed Circuit Board) defects using YOLOv5 and React. Built with:
@@ -159,17 +154,3 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 * [Render](https://render.com)
 * [Vercel](https://vercel.com)
 
-```
-
----
-
-### ✅ Next Step
-
-Replace the following placeholders with your actual links before committing:
-
-- `https://your-vercel-url.vercel.app`
-- `https://your-render-url.onrender.com`
-- `https://github.com/yourusername/pcb-defect-detector`
-
-Would you like me to generate a `.gitignore` file and `requirements.txt` too?
-```
