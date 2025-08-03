@@ -1,93 +1,91 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import torch
-import torchvision.transforms as T
 from PIL import Image
 import io
+import base64
+import numpy as np
 import os
 import pathlib
 import sys
-import numpy as np
-from flask_cors import CORS
-import uuid
-import base64
 import json # Import json for handling metadata
+import uuid # Import uuid for generating unique IDs
 
-# Fix PosixPath issue (when loading Linux-trained models on Windows)
-if isinstance(pathlib.Path(), pathlib.WindowsPath):
-    pathlib.PosixPath = pathlib.WindowsPath
+# Import YOLO from ultralytics
+# Ensure 'ultralytics' is in your requirements.txt
+try:
+    from ultralytics import YOLO
+except ImportError as e:
+    print(f"Error importing ultralytics: {e}")
+    print("Please ensure ultralytics is installed. Run: pip install ultralytics")
+    sys.exit(1) # Exit if YOLO cannot be imported
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend-backend communication
+# Enable CORS for frontend-backend communication.
+# IMPORTANT: In a production environment, replace "*" with your Vercel frontend domain (e.g., "https://your-vercel-app.vercel.app")
+CORS(app)
 
-# Add yolov5 path so we can import DetectMultiBackend
-# Assumes yolov5 repository is cloned as a sibling directory or within the same directory
-yolov5_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'yolov5'))
-if yolov5_path not in sys.path:
-    sys.path.append(yolov5_path)
+# Determine device for model loading
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
+# Load YOLO model
+# Make sure 'best.pt' or 'last.pt' is in the same directory as app.py
 try:
-    from yolov5.models.common import DetectMultiBackend
-    from yolov5.utils.general import non_max_suppression, scale_boxes
-    from yolov5.utils.torch_utils import select_device
-except ImportError as e:
-    print(f"Error importing YOLOv5 modules: {e}")
-    print("Make sure YOLOv5 is properly installed and the path is correct.")
-    print("You might need to run: pip install -r yolov5/requirements.txt")
-    # Fallback to basic torch device selection if YOLOv5 imports fail
-    def select_device(device=''):
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Attempt to load best.pt first, fallback to last.pt if not found
+    if os.path.exists('best.pt'):
+        model = YOLO('best.pt')
+        print("Loaded model: best.pt")
+    elif os.path.exists('last.pt'):
+        model = YOLO('last.pt')
+        print("Loaded model: last.pt")
+    else:
+        raise FileNotFoundError("Neither best.pt nor last.pt found in the current directory.")
+    
+    # Ensure model is on the correct device
+    model.to(device)
+    print(f"Model moved to {device}")
 
-# Define class names mapping (adjust according to your model's classes)
-# These should match the classes your YOLOv5 model was trained on
-CLASS_NAMES = {
+except Exception as e:
+    print(f"Error loading model: {e}")
+    model = None # Set model to None to indicate failure
+    # Fallback/error handling for model loading
+    # In a real application, you might want to stop the server or serve a maintenance page
+    # For now, we'll allow the app to run but predictions will fail.
+
+# Define class names mapping from the model
+# Ultralytics models have a .names attribute
+CLASS_NAMES = model.names if model and hasattr(model, 'names') else {
     0: 'missing_hole',
-    1: 'mouse_bite', 
+    1: 'mouse_bite',
     2: 'open_circuit',
     3: 'short',
     4: 'spur',
     5: 'spurious_copper'
 }
+print(f"Model class names: {CLASS_NAMES}")
 
-# Load YOLOv5 model using DetectMultiBackend
-device = select_device('')  # Automatically selects CUDA if available, else CPU
-# Ensure 'last.pt' (your trained YOLOv5 model) is in the same directory as app.py
-model_path = 'best.pt'
+@app.route('/')
+def home():
+    """Simple home route for health check."""
+    return "PCB Defect Detector Backend is running!", 200
 
-try:
-    model = DetectMultiBackend(model_path, device=device)
-    model.eval() # Set model to evaluation mode
-    print("✅ YOLOv5 model loaded successfully.")
-    print(f"Model device: {model.device}")
-    print(f"Model names: {getattr(model, 'names', CLASS_NAMES)}")
-except Exception as e:
-    print(f"❌ Error loading model: {e}")
-    model = None # Set model to None if loading fails to prevent further errors
+# This function is no longer needed with ultralytics' direct prediction
+# def preprocess_image(image, target_size=(640, 640)):
+#     """
+#     Preprocesses a PIL Image for YOLOv5 inference.
+#     Resizes the image and normalizes pixel values.
+#     """
+#     image_resized = image.resize(target_size)
+#     img_array = np.array(image_resized)
+#     img_tensor = torch.from_numpy(img_array).float() / 255.0
+#     if img_tensor.ndimension() == 3:
+#         img_tensor = img_tensor.permute(2, 0, 1)
+#     img_tensor = img_tensor.unsqueeze(0)
+#     return img_tensor
 
-# Simple image preprocessing function
-def preprocess_image(image, target_size=(640, 640)):
-    """
-    Preprocesses a PIL Image for YOLOv5 inference.
-    Resizes the image and normalizes pixel values.
-    """
-    # Resize image to target_size (e.g., 640x640)
-    image_resized = image.resize(target_size)
-    
-    # Convert to numpy array
-    img_array = np.array(image_resized)
-    
-    # Convert to tensor and normalize to [0, 1]
-    img_tensor = torch.from_numpy(img_array).float() / 255.0
-    
-    # Rearrange dimensions from HWC (Height, Width, Channels) to CHW (Channels, Height, Width)
-    if img_tensor.ndimension() == 3:
-        img_tensor = img_tensor.permute(2, 0, 1)
-    
-    # Add batch dimension (B, C, H, W)
-    img_tensor = img_tensor.unsqueeze(0)
-    
-    return img_tensor
-
+# This function is for optional visual expansion, not core to model accuracy
 def expand_bounding_box(bbox, image_width, image_height, expansion_factor=0.05):
     """
     Expands a bounding box by a given factor, ensuring it stays within image bounds.
@@ -128,69 +126,28 @@ def process_single_image(image_data, frontend_image_id, filename=None):
         original_width, original_height = image.size
         print(f"Processing image: {filename or frontend_image_id}, Original Size: {original_width}x{original_height}")
         
-        # Preprocess image for model input
-        img_tensor = preprocess_image(image).to(device)
-        
-        # Perform inference
-        with torch.no_grad():
-            predictions = model(img_tensor)
-
-        # Apply Non-Maximum Suppression (NMS) to filter overlapping boxes
-        conf_thres = 0.25  # Confidence threshold for detections
-        iou_thres = 0.45   # IoU threshold for NMS
-        
-        try:
-            # Use YOLOv5's NMS function
-            pred = non_max_suppression(predictions, conf_thres, iou_thres)
-        except Exception as nms_error:
-            print(f"NMS error: {nms_error}. Falling back to direct prediction processing.")
-            # Fallback if NMS fails (e.g., due to unexpected prediction format)
-            pred = predictions
-            if isinstance(pred, tuple): # Handle cases where predictions might be a tuple
-                pred = pred[0]
-            if not isinstance(pred, list): # Ensure it's iterable
-                pred = [pred]
+        # Perform inference using the ultralytics model
+        # model.predict can take PIL Image directly.
+        # verbose=False suppresses logging from ultralytics.
+        # imgsz=640 ensures input size consistency.
+        preds = model.predict(image, verbose=False, imgsz=640) 
         
         detections = []
         
-        # Process each detected object
-        for i, det in enumerate(pred):  # detections per image in the batch
-            if len(det):
-                # Rescale bounding boxes from model's input size (640x640) back to original image size
-                try:
-                    det[:, :4] = scale_boxes(img_tensor.shape[2:], det[:, :4], (original_height, original_width)).round()
-                except Exception as scale_error:
-                    print(f"Scale boxes error: {scale_error}. Performing manual rescaling.")
-                    # Manual rescaling if scale_boxes fails (e.g., due to missing utility)
-                    scale_x = original_width / img_tensor.shape[3] # img_tensor.shape[3] is width (640)
-                    scale_y = original_height / img_tensor.shape[2] # img_tensor.shape[2] is height (640)
-                    det[:, 0] *= scale_x  # x1
-                    det[:, 1] *= scale_y  # y1
-                    det[:, 2] *= scale_x  # x2
-                    det[:, 3] *= scale_y  # y2
-                
-                # Iterate through each individual detection
-                for *xyxy, conf, cls in reversed(det):
-                    class_id = int(cls)
-                    confidence = float(conf)
-                    
-                    # Get human-readable class name
+        # Process each detected object from the Results object
+        for pred in preds: # preds is a list of Results objects, one per image
+            if pred.boxes: # Check if bounding boxes are detected
+                for box in pred.boxes:
+                    # box.xyxy: [x1, y1, x2, y2] in pixels (already scaled to original image size by ultralytics)
+                    # box.conf: confidence score
+                    # box.cls: class ID
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    confidence = float(box.conf[0])
+                    class_id = int(box.cls[0])
                     class_name = CLASS_NAMES.get(class_id, f'unknown_{class_id}')
-                    
-                    # Convert coordinates to float and ensure they are within image bounds
-                    x1, y1, x2, y2 = float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
-                    
-                    x1 = max(0, min(x1, original_width))
-                    y1 = max(0, min(y1, original_height))
-                    x2 = max(0, min(x2, original_width))
-                    y2 = max(0, min(y2, original_height))
-                    
-                    # Skip invalid bounding boxes (e.g., zero width/height)
-                    if x2 <= x1 or y2 <= y1:
-                        print(f"  Skipping invalid bbox: ({x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f})")
-                        continue
-                    
-                    # Optionally expand bounding box for better visibility on frontend
+
+                    # Optionally apply expansion for better visibility on frontend
+                    # If you want exact boxes, remove the expand_bounding_box call
                     x1_exp, y1_exp, x2_exp, y2_exp = expand_bounding_box(
                         (x1, y1, x2, y2), original_width, original_height
                     )
@@ -236,11 +193,6 @@ def process_single_image(image_data, frontend_image_id, filename=None):
             "image_dimensions": {"width": 0, "height": 0}, # Indicate unknown dimensions on error
             "total_detections": 0
         }
-
-@app.route('/')
-def home():
-    """Simple home route to confirm backend is running."""
-    return "PCB Defect Detector Backend is running."
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -323,7 +275,7 @@ def predict():
                 processing_errors.append(f"Image '{file.filename}' (ID: {frontend_id}): {result['error']}")
     
     if not results:
-        return jsonify({"error": "No images provided for processing. Please upload images or use the camera."}), 400
+        return jsonify({"error": "No valid images provided for detection."}), 400
     
     # Generate summary statistics from all processed results
     defect_summary = {}
@@ -343,29 +295,16 @@ def predict():
         },
         "debug_info": { # Useful for debugging backend issues
             "model_device": str(device),
-            "model_names": getattr(model, 'names', CLASS_NAMES),
+            "model_names": CLASS_NAMES,
             "total_results": len(results)
         }
     }
     
-    # Debug information for backend console
-    print(f"--- Prediction complete ---")
-    print(f"Processed {len(results)} images.")
-    print(f"Total defects found across all images: {total_defects}")
-    if defect_summary:
-        print("Defect breakdown:")
-        for defect_type, count in defect_summary.items():
-            print(f"  {defect_type}: {count}")
-    if processing_errors:
-        print(f"Errors encountered: {len(processing_errors)}")
-        for err in processing_errors:
-            print(f"  - {err}")
-    print("---------------------------\n")
-    
-    return jsonify(response_data)
+    print(f"Processed {len(results)} images. Total defects found: {total_defects}")
+    return jsonify(response_data), 200
 
 if __name__ == '__main__':
     # Run the Flask app
     # Ensure 'last.pt' and 'yolov5' directory are correctly set up.
     # The host '0.0.0.0' makes it accessible from other devices on the network.
-    app.run(debug=True, host='0.0.0.0', port=5000) 
+    app.run(debug=True, host='0.0.0.0', port=5000)
