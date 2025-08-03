@@ -140,6 +140,9 @@ const PCBDefectDetector = () => {
       let response;
       let requestBody;
 
+      // Render backend URL
+      const backendUrl = 'https://pcb-detector-backend.onrender.com/predict'; // Replaced with your Render URL
+
       // Determine if there are any camera images (base64) or only file uploads
       const hasCameraImages = images.some(img => img.type === 'camera');
 
@@ -153,7 +156,8 @@ const PCBDefectDetector = () => {
             src: img.src // This will be base64 for camera, or dataURL for uploaded images
           }))
         };
-        response = await fetch('http://localhost:5000/predict', {
+        console.log('Sending JSON request to backend:', requestBody); // Debugging
+        response = await fetch(backendUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -173,14 +177,16 @@ const PCBDefectDetector = () => {
         });
         // Append the metadata as a JSON string
         formData.append('image_metadata', JSON.stringify(imageMetadata));
+        console.log('Sending FormData request to backend.'); // Debugging
 
-        response = await fetch('http://localhost:5000/predict', {
+        response = await fetch(backendUrl, {
           method: 'POST',
           body: formData,
         });
       }
 
       const data = await response.json();
+      console.log('Backend response:', data); // Debugging
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to process the images');
@@ -192,8 +198,8 @@ const PCBDefectDetector = () => {
       setSummary(data.summary || {});
 
     } catch (err) {
-      console.error(err);
-      setError(err.message || 'Failed to connect to the backend. Make sure the Flask server is running.');
+      console.error('Error during defect detection:', err); // More detailed error logging
+      setError(err.message || 'Failed to connect to the backend. Make sure the Flask server is running and accessible.');
     } finally {
       setLoading(false);
     }
@@ -237,42 +243,62 @@ const PCBDefectDetector = () => {
           return;
         }
 
-        const rect = imageElement.getBoundingClientRect(); // Get current display size and position of the image
-        
-        const displayWidth = rect.width;
-        const displayHeight = rect.height;
-        
         const naturalWidth = imageDimensions.width;
         const naturalHeight = imageDimensions.height;
         
-        // Calculate scale factors from natural (original) size to displayed size
-        const scaleX = displayWidth / naturalWidth;
-        const scaleY = displayHeight / naturalHeight;
+        // Get the actual rendered dimensions of the image content within the <img> tag
+        // This accounts for object-fit: contain and any letterboxing/pillarboxing
+        const imgRect = imageElement.getBoundingClientRect();
+        const imgDisplayWidth = imgRect.width;
+        const imgDisplayHeight = imgRect.height;
 
-        console.log('BoundingBox Debug:', {
+        let renderedImageWidth;
+        let renderedImageHeight;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        const imageAspectRatio = naturalWidth / naturalHeight;
+        const containerAspectRatio = imgDisplayWidth / imgDisplayHeight;
+
+        if (containerAspectRatio > imageAspectRatio) {
+          // Container is wider than image, image height is constrained
+          renderedImageHeight = imgDisplayHeight;
+          renderedImageWidth = imgDisplayHeight * imageAspectRatio;
+          offsetX = (imgDisplayWidth - renderedImageWidth) / 2; // Calculate horizontal offset
+        } else {
+          // Container is taller than image, image width is constrained
+          renderedImageWidth = imgDisplayWidth;
+          renderedImageHeight = imgDisplayWidth / imageAspectRatio;
+          offsetY = (imgDisplayHeight - renderedImageHeight) / 2; // Calculate vertical offset
+        }
+
+        // Calculate scale factors from natural (original) size to rendered content size
+        const scaleX = renderedImageWidth / naturalWidth;
+        const scaleY = renderedImageHeight / naturalHeight;
+
+        console.log('BoundingBox Debug (Precise):', {
           imageId,
-          displaySize: { width: displayWidth, height: displayHeight },
           naturalSize: { width: naturalWidth, height: naturalHeight },
+          containerSize: { width: imgDisplayWidth, height: imgDisplayHeight },
+          renderedImageSize: { width: renderedImageWidth, height: renderedImageHeight },
+          offset: { offsetX, offsetY },
           scale: { scaleX, scaleY },
-          predictionsCount: predictions.length,
-          imageRect: rect
+          predictionsCount: predictions.length
         });
 
         const newBoxes = predictions.map((detection, index) => {
-          // Use 'bbox' or 'location' property for coordinates
           const box = detection.bbox || detection.location || {};
           
-          // Parse coordinates, ensuring they are numbers
           const x1 = parseFloat(box.x1) || 0;
           const y1 = parseFloat(box.y1) || 0;
           const x2 = parseFloat(box.x2) || 0;
           const y2 = parseFloat(box.y2) || 0;
 
-          // Calculate scaled coordinates relative to the image container
+          // Apply scaling and offset
           const scaledBox = {
             id: index,
-            left: x1 * scaleX,
-            top: y1 * scaleY,
+            left: (x1 * scaleX) + offsetX,
+            top: (y1 * scaleY) + offsetY,
             width: (x2 - x1) * scaleX,
             height: (y2 - y1) * scaleY,
             class: detection.class || detection.type || 'unknown',
@@ -1085,11 +1111,8 @@ const PCBDefectDetector = () => {
                 {/* Breakdown of defects by type */}
                 {Object.entries(getOverallStats()).map(([defect, count]) => (
                   <div key={defect} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#f8f9fa', borderRadius: '6px', borderLeft: `4px solid ${defectColors[defect]}` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: defectColors[defect] }} />
-                      <span style={{ fontSize: '0.85rem', textTransform: 'capitalize' }}>{defect.replace('_', ' ')}</span>
-                    </div>
-                    <span style={{ fontWeight: '700' }}>{count}</span>
+                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: defectColors[defect] }} />
+                    <span style={{ fontSize: '0.85rem', textTransform: 'capitalize' }}>{defect.replace('_', ' ')}</span>
                   </div>
                 ))}
               </div>
