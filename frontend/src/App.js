@@ -372,7 +372,7 @@ const PCBDefectDetector = () => {
                 textOverflow: 'ellipsis'
               }}
             >
-              {box.class.replace('_', ' ')} {(box.confidence * 100).toFixed(0)}%
+              {box.class.replace('_', ' ')} ${(box.confidence * 100).toFixed(0)}%
             </div>
           </div>
         ))}
@@ -738,190 +738,6 @@ const PCBDefectDetector = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Function to download HTML document with embedded images
-  const downloadDocumentWithImages = async () => {
-    let htmlContent = `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>PCB Defect Report with Images</title>
-          <style>
-              body { font-family: 'Inter', sans-serif; line-height: 1.6; color: #333; margin: 20px; background-color: #f4f7f6; }
-              .container { max-width: 1000px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-              h1, h2, h3, h4 { color: #2c3e50; }
-              h1 { text-align: center; color: #667eea; margin-bottom: 20px; }
-              .section { margin-bottom: 30px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #fdfdfd; }
-              .summary-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #eee; }
-              .summary-item:last-child { border-bottom: none; }
-              .image-section { border: 1px solid #dcdcdc; border-radius: 8px; padding: 15px; margin-bottom: 20px; background-color: #fff; }
-              .image-title { font-size: 1.1em; margin-top: 0; margin-bottom: 10px; color: #34495e; }
-              .image-wrapper { text-align: center; margin-bottom: 15px; }
-              .image-wrapper img { max-width: 100%; height: auto; border: 1px solid #eee; border-radius: 5px; }
-              .detection-list { list-style: none; padding: 0; margin: 0; }
-              .detection-item { background: #e8f5e9; margin-bottom: 8px; padding: 10px; border-radius: 5px; border-left: 5px solid #4CAF50; display: flex; justify-content: space-between; align-items: center; }
-              .detection-item strong { color: #2e7d32; }
-              .error-message { color: #d32f2f; background-color: #ffebee; padding: 10px; border-radius: 5px; border: 1px solid #ef9a9a; }
-              .legend-item { display: flex; align-items: center; margin-bottom: 5px; }
-              .legend-color { width: 20px; height: 20px; border-radius: 4px; margin-right: 10px; }
-              .footer { text-align: center; margin-top: 40px; font-size: 0.9em; color: #777; }
-          </style>
-      </head>
-      <body>
-          <div class="container">
-              <h1>PCB Defect Detection Report</h1>
-              <p style="text-align: center;">Generated on: ${new Date().toLocaleString()}</p>
-              <p style="text-align: center;">Processing Time: ${processingTime}s</p>
-
-              <div class="section">
-                  <h2>Overall Summary</h2>
-                  <div class="summary-item"><span>Total Images Processed:</span> <strong>${images.length}</strong></div>
-                  <div class="summary-item"><span>Total Defects Found:</span> <strong>${summary.total_defects_found || 0}</strong></div>
-                  <h4>Defect Breakdown:</h4>
-                  ${Object.entries(getOverallStats()).map(([defect, count]) => `
-                      <div class="summary-item"><span>${defect.replace('_', ' ').toUpperCase()}:</span> <strong>${count}</strong></div>
-                  `).join('')}
-              </div>
-
-              <div class="section">
-                  <h2>Detailed Image Analysis</h2>
-                  ${results.map((result, index) => {
-                      const image = images.find(img => img.id === result.image_id);
-                      const imageName = image ? image.name : `Image ${index + 1}`;
-                      const imageSrc = image ? image.src : ''; // Get the original image source
-
-                      let imageHtml = '';
-                      if (imageSrc && result.image_dimensions && result.predictions) {
-                          // Draw image with bounding boxes on canvas and get data URL
-                          // Using a temporary canvas element for drawing
-                          return drawImageWithBoxesToCanvas(imageSrc, result.predictions, result.image_dimensions)
-                              .then(dataUrl => {
-                                  if (dataUrl) {
-                                      imageHtml = `<div class="image-wrapper"><img src="${dataUrl}" alt="${imageName} with defects"></div>`;
-                                  } else {
-                                      imageHtml = `<p class="error-message">Could not render image with bounding boxes.</p>`;
-                                  }
-                                  return `
-                                      <div class="image-section">
-                                          <h3 class="image-title">${imageName}</h3>
-                                          ${imageHtml}
-                                          <h4>Defects Detected: ${result.total_detections}</h4>
-                                          ${result.error ? `<p class="error-message">Error: ${result.error}</p>` : ''}
-                                          ${result.predictions && result.predictions.length > 0 ? `
-                                              <ul class="detection-list">
-                                                  ${result.predictions.map((detection, detIndex) => {
-                                                      const bbox = detection.bbox || detection.location || {};
-                                                      return `
-                                                          <li class="detection-item" style="border-left-color: ${defectColors[detection.class] || '#FF0000'};">
-                                                              <div>
-                                                                  <strong>${detection.class?.replace('_', ' ').toUpperCase()}</strong>
-                                                                  <br>
-                                                                  Confidence: ${(detection.confidence * 100).toFixed(1)}%
-                                                                  <br>
-                                                                  Position: (${Math.round(bbox.x1 || 0)}, ${Math.round(bbox.y1 || 0)}) - (${Math.round(bbox.x2 || 0)}, ${Math.round(bbox.y2 || 0)})
-                                                              </div>
-                                                              <span style="font-size: 0.9em; color: #555;">${defectDescriptions[detection.class] || 'No description available'}</span>
-                                                          </li>
-                                                      `;
-                                                  }).join('')}
-                                              </ul>
-                                          ` : '<p>No defects detected in this image.</p>'}
-                                      </div>
-                                  `;
-                              });
-                      } else {
-                          // Handle cases where image data or results are missing
-                          return Promise.resolve(`
-                              <div class="image-section">
-                                  <h3 class="image-title">${imageName}</h3>
-                                  <p class="error-message">Image data or detection results unavailable.</p>
-                              </div>
-                          `);
-                      }
-                  }).join('')}
-              </div>
-
-              <div class="section">
-                  <h2>Defect Type Descriptions</h2>
-                  ${Object.entries(defectDescriptions).map(([type, description]) => `
-                      <div class="legend-item">
-                          <div class="legend-color" style="background-color: ${defectColors[type] || '#ccc'};"></div>
-                          <strong>${type.replace('_', ' ').toUpperCase()}:</strong> ${description}
-                      </div>
-                  `).join('')}
-              </div>
-
-              <div class="footer">
-                  <p>&copy; ${new Date().getFullYear()} Neural PCB Detector. All rights reserved.</p>
-              </div>
-          </div>
-      </body>
-      </html>
-    `;
-
-    // Wait for all image drawing promises to resolve
-    const imageSectionsPromises = results.map(async (result, index) => {
-      const image = images.find(img => img.id === result.image_id);
-      const imageName = image ? image.name : `Image ${index + 1}`;
-      const imageSrc = image ? image.src : '';
-
-      let imageHtml = '';
-      if (imageSrc && result.image_dimensions && result.predictions) {
-          const dataUrl = await drawImageWithBoxesToCanvas(imageSrc, result.predictions, result.image_dimensions);
-          if (dataUrl) {
-              imageHtml = `<div class="image-wrapper"><img src="${dataUrl}" alt="${imageName} with defects"></div>`;
-          } else {
-              imageHtml = `<p class="error-message">Could not render image with bounding boxes.</p>`;
-          }
-      } else {
-          imageHtml = `<p class="error-message">Image data or detection results unavailable.</p>`;
-      }
-
-      return `
-          <div class="image-section">
-              <h3 class="image-title">${imageName}</h3>
-              ${imageHtml}
-              <h4>Defects Detected: ${result.total_detections}</h4>
-              ${result.error ? `<p class="error-message">Error: ${result.error}</p>` : ''}
-              ${result.predictions && result.predictions.length > 0 ? `
-                  <ul class="detection-list">
-                      ${result.predictions.map((detection, detIndex) => {
-                          const bbox = detection.bbox || detection.location || {};
-                          return `
-                              <li class="detection-item" style="border-left-color: ${defectColors[detection.class] || '#FF0000'};">
-                                  <div>
-                                      <strong>${detection.class?.replace('_', ' ').toUpperCase()}</strong>
-                                      <br>
-                                      Confidence: ${(detection.confidence * 100).toFixed(1)}%
-                                      <br>
-                                      Position: (${Math.round(bbox.x1 || 0)}, ${Math.round(bbox.y1 || 0)}) - (${Math.round(bbox.x2 || 0)}, ${Math.round(bbox.y2 || 0)})
-                                  </div>
-                                  <span style="font-size: 0.9em; color: #555;">${defectDescriptions[detection.class] || 'No description available'}</span>
-                              </li>
-                          `;
-                      }).join('')}
-                  </ul>
-              ` : '<p>No defects detected in this image.</p>'}
-          </div>
-      `;
-    });
-
-    const resolvedImageSections = await Promise.all(imageSectionsPromises);
-    htmlContent = htmlContent.replace(
-      '                  ${results.map((result, index) => {', // Placeholder start
-      resolvedImageSections.join('')
-    );
-
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pcb_defect_report_with_images_${new Date().toISOString().split('T')[0]}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
 
   return (
     <div style={{
@@ -954,7 +770,7 @@ const PCBDefectDetector = () => {
         </div>
 
         {/* Main Content Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '30px', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '30px', alignItems: 'start' }} className="main-grid">
           {/* Left Column - Image Management & Display */}
           <div>
             {/* Controls Section */}
@@ -965,26 +781,26 @@ const PCBDefectDetector = () => {
               backdropFilter: 'blur(20px)',
               marginBottom: '20px',
               boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            }} className="controls-section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }} className="section-header">
                 <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '0', fontSize: '1.3rem', fontWeight: '700' }}>
                   <ImageIcon size={24} />
                   Image Management
                 </h2>
                 {processingTime > 0 && (
-                  <div style={{ background: '#e6fffa', color: '#008080', padding: '8px 15px', borderRadius: '20px', fontSize: '0.9rem', fontWeight: '600' }}>
+                  <div style={{ background: '#e6fffa', color: '#008080', padding: '8px 15px', borderRadius: '20px', fontSize: '0.9rem', fontWeight: '600' }} className="processing-time">
                     Processing: {processingTime}s
                   </div>
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '15px' }}>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '15px' }} className="button-group">
                 <label style={{
                   display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px',
                   background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
                   color: 'white', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
                   border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-                }}>
+                }} className="action-button">
                   <Plus size={18} />
                   Add Images
                   <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleMultipleImageUpload} style={{ display: 'none' }} />
@@ -995,7 +811,7 @@ const PCBDefectDetector = () => {
                   background: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
                   color: '#2d3748', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
                   border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-                }}>
+                }} className="action-button">
                   <Camera size={18} />
                   {showCamera ? 'Stop Camera' : 'Use Camera'}
                 </button>
@@ -1007,12 +823,12 @@ const PCBDefectDetector = () => {
                       background: 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
                       color: '#2d3748', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
                       border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-                    }}>
+                    }} className="action-button">
                       <X size={18} />
                       Clear All
                     </button>
                     
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: '#4a5568' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: '#4a5568' }} className="checkbox-label">
                       <input type="checkbox" checked={showBoundingBoxes} onChange={(e) => setShowBoundingBoxes(e.target.checked)} />
                       <Eye size={16} />
                       Show Bounding Boxes
@@ -1027,7 +843,7 @@ const PCBDefectDetector = () => {
                       background: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
                       color: '#2d3748', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
                       border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-                    }}>
+                    }} className="action-button">
                       <Download size={18} />
                       JSON Report
                     </button>
@@ -1037,7 +853,7 @@ const PCBDefectDetector = () => {
                       background: 'linear-gradient(135deg, #d299c2 0%, #fef9d7 100%)',
                       color: '#2d3748', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
                       border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-                    }}>
+                    }} className="action-button">
                       <FileText size={18} />
                       Text Report
                     </button>
@@ -1046,7 +862,7 @@ const PCBDefectDetector = () => {
               </div>
 
               {error && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fed7d7', color: '#c53030', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fed7d7', color: '#c53030', padding: '12px', borderRadius: '8px', marginBottom: '15px' }} className="error-message">
                   <AlertCircle size={20} />
                   {error}
                 </div>
@@ -1054,17 +870,17 @@ const PCBDefectDetector = () => {
 
               {/* Camera Live View Section */}
               {showCamera && (
-                <div style={{ marginBottom: '20px' }}>
+                <div style={{ marginBottom: '20px' }} className="camera-section">
                   <div style={{ background: '#000', borderRadius: '12px', overflow: 'hidden', marginBottom: '12px' }}>
                     <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '300px', objectFit: 'cover' }} />
                   </div>
-                  <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                  <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }} className="camera-controls">
                     <button onClick={capturePhoto} style={{
                       background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
                       color: 'white', border: 'none', padding: '12px 20px', borderRadius: '10px',
                       fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
                       transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-                    }}>
+                    }} className="action-button">
                       <Camera size={18} />
                       Capture Photo
                     </button>
@@ -1076,14 +892,14 @@ const PCBDefectDetector = () => {
 
               {/* Detect Button */}
               {images.length > 0 && (
-                <div style={{ textAlign: 'center' }}>
+                <div style={{ textAlign: 'center' }} className="detect-button-container">
                   <button onClick={detectDefects} disabled={loading} style={{
                     display: 'flex', alignItems: 'center', gap: '10px', padding: '15px 30px',
                     background: loading ? '#9ca3af' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     color: 'white', borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer',
                     fontWeight: '700', fontSize: '1.1rem', border: 'none', margin: '0 auto',
                     transition: 'background-color 0.3s ease'
-                  }}>
+                  }} className="detect-button">
                     {loading ? (
                       <>
                         <Loader2 style={{ animation: 'spin 1s linear infinite' }} size={20} />
@@ -1112,7 +928,7 @@ const PCBDefectDetector = () => {
                 background: 'rgba(255, 255, 255, 0.1)',
                 borderRadius: '15px',
                 boxShadow: '0 4px 15px rgba(0,0,0,0.1)'
-              }}>
+              }} className="images-grid">
                 {images.map((image) => {
                   const imageResult = results.find(r => r.image_id === image.id); // Find results for this specific image
                   return (
@@ -1124,11 +940,11 @@ const PCBDefectDetector = () => {
                       cursor: 'pointer',
                       transition: 'transform 0.2s ease, box-shadow 0.2s ease'
                     }} className="image-card">
-                      <div style={{ padding: '12px', background: '#f8f9fa', borderBottom: '1px solid #e9ecef', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ padding: '12px', background: '#f8f9fa', borderBottom: '1px solid #e9ecef', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} className="image-card-header">
                         <h4 style={{ margin: '0', fontSize: '0.85rem', fontWeight: '600', color: '#495057', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '160px' }}>
                           {image.name}
                         </h4>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} className="image-card-actions">
                           {imageResult && imageResult.predictions && imageResult.predictions.length > 0 && (
                             <button
                               onClick={(e) => {
@@ -1192,7 +1008,7 @@ const PCBDefectDetector = () => {
                           ref={el => imageRefs.current[image.id] = el} // Store ref for this image
                           src={image.src}
                           alt={image.name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                           onLoad={() => {
                             // Force bounding box recalculation after image loads
                             setTimeout(() => {
@@ -1241,7 +1057,7 @@ const PCBDefectDetector = () => {
           </div>
 
           {/* Right Column - Summary & Results */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }} className="sidebar">
             {/* Summary Statistics Card */}
             <div style={{ 
               background: 'rgba(255, 255, 255, 0.95)', 
@@ -1249,7 +1065,7 @@ const PCBDefectDetector = () => {
               padding: '20px', 
               backdropFilter: 'blur(20px)',
               boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)'
-            }}>
+            }} className="summary-card">
               <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 15px 0', fontSize: '1.1rem', fontWeight: '700' }}>
                 <BarChart3 size={18} />
                 Summary
@@ -1286,14 +1102,14 @@ const PCBDefectDetector = () => {
               padding: '20px', 
               backdropFilter: 'blur(20px)',
               boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)'
-            }}>
+            }} className="results-card">
               <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 15px 0', fontSize: '1.1rem', fontWeight: '700' }}>
                 <CheckCircle size={18} />
                 Results
               </h3>
 
               {results.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '30px 10px', color: '#6c757d' }}>
+                <div style={{ textAlign: 'center', padding: '30px 10px', color: '#6c757d' }} className="no-results-message">
                   <Target size={40} style={{ opacity: '0.5', marginBottom: '10px' }} />
                   <div style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '5px' }}>
                     {loading ? 'Analyzing...' : 'No results yet'}
@@ -1303,9 +1119,9 @@ const PCBDefectDetector = () => {
                   </p>
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '400px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '400px', overflowY: 'auto' }} className="results-list">
                   {results.map((result, index) => (
-                    <div key={result.image_id} style={{ border: '1px solid #e9ecef', borderRadius: '8px', padding: '12px' }}>
+                    <div key={result.image_id} style={{ border: '1px solid #e9ecef', borderRadius: '8px', padding: '12px' }} className="image-result-item">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: '600' }}>
                           {images.find(img => img.id === result.image_id)?.name || `Image ${index + 1}`}
@@ -1316,7 +1132,7 @@ const PCBDefectDetector = () => {
                       </div>
                       
                       {result.error ? (
-                        <div style={{ color: '#dc3545', fontSize: '0.85rem' }}>{result.error}</div>
+                        <div style={{ color: '#dc3545', fontSize: '0.85rem' }} className="error-text">{result.error}</div>
                       ) : (
                         result.predictions && result.predictions.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1350,11 +1166,11 @@ const PCBDefectDetector = () => {
               padding: '15px', 
               backdropFilter: 'blur(20px)',
               boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)'
-            }}>
+            }} className="legend-card">
               <h4 style={{ margin: '0 0 12px 0', fontSize: '1rem', fontWeight: '700' }}>Defect Types</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }} className="legend-grid">
                 {Object.entries(defectColors).map(([defect, color]) => (
-                  <div key={defect} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px', background: '#f8f9fa', borderRadius: '4px' }}>
+                  <div key={defect} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px', background: '#f8f9fa', borderRadius: '4px' }} className="legend-item">
                     <div style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: color, flexShrink: 0 }} />
                     <span style={{ fontSize: '0.75rem', color: '#495057', textTransform: 'capitalize' }}>
                       {defect.replace('_', ' ')}
@@ -1399,11 +1215,24 @@ const PCBDefectDetector = () => {
           box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
         }
         
+        /* Base styles for responsiveness */
+        .main-grid {
+          grid-template-columns: 1fr 350px; /* Default for larger screens */
+        }
+
+        .button-group {
+          flex-direction: row; /* Default for larger screens */
+          flex-wrap: wrap;
+        }
+
+        .legend-grid {
+          grid-template-columns: 1fr 1fr; /* Default for larger screens */
+        }
+
         /* Responsive adjustments for smaller screens */
         @media (max-width: 1200px) {
-          /* Change main grid to single column layout */
-          div[style*="gridTemplateColumns: 1fr 350px"] {
-            grid-template-columns: 1fr !important;
+          .main-grid {
+            grid-template-columns: 1fr !important; /* Single column layout for smaller desktops/tablets */
           }
         }
         
@@ -1413,13 +1242,52 @@ const PCBDefectDetector = () => {
           }
           .app-header p {
             font-size: 1rem !important;
+            padding: 0 10px; /* Add some padding for text on small screens */
           }
-          div[style*="display: flex; gap: 12px; flex-wrap: wrap"] {
-            flex-direction: column !important;
-            align-items: stretch !important;
+          .button-group {
+            flex-direction: column !important; /* Stack buttons vertically on mobile */
+            align-items: stretch !important; /* Stretch buttons to full width */
+            gap: 10px !important; /* Adjust gap for stacked items */
           }
-          div[style*="display: grid; gridTemplateColumns: 1fr 1fr"] {
-            grid-template-columns: 1fr !important;
+          .action-button, .checkbox-label {
+            width: 100%; /* Full width for buttons and labels */
+            justify-content: center; /* Center content in buttons */
+            padding: 12px 15px !important; /* Increase padding for better touch targets */
+          }
+          .legend-grid {
+            grid-template-columns: 1fr !important; /* Single column for legend on mobile */
+          }
+          .images-grid {
+            grid-template-columns: 1fr !important; /* Single column for images on mobile */
+            max-height: none !important; /* Remove fixed height, allow content to dictate height */
+            overflow-y: visible !important; /* Allow content to flow naturally */
+          }
+          .image-card {
+            width: 100%; /* Ensure image cards take full width */
+          }
+          .sidebar {
+            padding: 15px !important; /* Adjust sidebar padding for mobile */
+          }
+          .controls-section, .summary-card, .results-card, .legend-card {
+            padding: 15px !important; /* Adjust card padding for mobile */
+          }
+          .section-header {
+            flex-direction: column; /* Stack header elements */
+            align-items: flex-start;
+            gap: 10px;
+          }
+          .processing-time {
+            width: 100%;
+            text-align: center;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .app-header h1 {
+            font-size: 1.8rem !important;
+          }
+          .app-header p {
+            font-size: 0.9rem !important;
           }
         }
       `}</style>
