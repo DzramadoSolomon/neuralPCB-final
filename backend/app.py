@@ -103,9 +103,21 @@ def process_single_image(image_data, frontend_image_id, filename=None):
         
         original_width, original_height = image.size
         print(f"Processing image: {filename or frontend_image_id}, Original Size: {original_width}x{original_height}")
+
+        # --- NEW CODE: Preprocess the PIL Image into a PyTorch Tensor ---
+        # Convert PIL Image to NumPy array
+        img_array = np.array(image)
+
+        # Transpose dimensions from (H, W, C) to (C, H, W)
+        # Add a batch dimension at the beginning: (1, C, H, W)
+        img_tensor = torch.from_numpy(img_array).permute(2, 0, 1).unsqueeze(0).float()
+
+        # Normalize pixel values to [0, 1]
+        img_tensor /= 255.0
         
-        # Run inference using YOLOv5
-        results = model(image)
+        # Run inference using YOLOv5 on the preprocessed tensor
+        results = model(img_tensor)
+        # --- END NEW CODE ---
         
         # Parse results
         detections = []
@@ -263,7 +275,7 @@ def predict():
             "processing_errors": processing_errors
         },
         "debug_info": {
-            "model_device": str(next(model.model.parameters()).device) if model else "unknown",
+            "model_device": str(next(model.parameters()).device) if model else "unknown",
             "model_names": CLASS_NAMES,
             "total_results": len(results)
         }
