@@ -141,7 +141,7 @@ const PCBDefectDetector = () => {
       let requestBody;
 
       // Render backend URL
-      const backendUrl = ' https://neuralpcb-final.onrender.com'; // Replaced with your Render URL
+      const backendUrl = 'https://neuralpcb-final.onrender.com/predict'; // Replaced with your Render URL
 
       // Determine if there are any camera images (base64) or only file uploads
       const hasCameraImages = images.some(img => img.type === 'camera');
