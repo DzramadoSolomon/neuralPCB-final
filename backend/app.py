@@ -6,56 +6,48 @@ import io
 import base64
 import numpy as np
 import os
-import pathlib
-import sys
 import json
 import uuid
 
-# Import YOLOv5 from the original repository
+# Import YOLOv5 using the pip package (much simpler for deployment)
 try:
-    # Clone YOLOv5 repo if not present
-    if not os.path.exists('yolov5'):
-        os.system('git clone https://github.com/ultralytics/yolov5.git')
-    
-    # Add yolov5 to path
-    sys.path.insert(0, './yolov5')
-    
-    # Import YOLOv5 model
-    from models.common import DetectMultiBackend
-    from utils.general import non_max_suppression, scale_coords
-    from utils.torch_utils import select_device
-    from utils.augmentations import letterbox
-    
+    import yolov5
     YOLOV5_AVAILABLE = True
+    print("YOLOv5 package imported successfully")
 except ImportError as e:
     print(f"Error importing YOLOv5: {e}")
-    print("YOLOv5 repository not found. Please clone it or use alternative solution.")
+    print("Please ensure yolov5 is installed. Run: pip install yolov5")
     YOLOV5_AVAILABLE = False
 
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
-# Determine device for model loading
-device = select_device('') if YOLOV5_AVAILABLE else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
 # Load YOLOv5 model
 model = None
 if YOLOV5_AVAILABLE:
     try:
+        # Check for custom model files
         if os.path.exists('best.pt'):
-            model = DetectMultiBackend('best.pt', device=device)
-            print("Loaded model: best.pt")
+            model = yolov5.load('best.pt')
+            print("Loaded custom model: best.pt")
         elif os.path.exists('last.pt'):
-            model = DetectMultiBackend('last.pt', device=device)
-            print("Loaded model: last.pt")
+            model = yolov5.load('last.pt')
+            print("Loaded custom model: last.pt")
         else:
-            raise FileNotFoundError("Neither best.pt nor last.pt found in the current directory.")
+            # Fallback to a pretrained model for testing
+            print("No custom model found. You need to upload your best.pt or last.pt file.")
+            model = None
         
-        # Warm up the model
-        if hasattr(model, 'warmup'):
-            model.warmup(imgsz=(1, 3, 640, 640))
+        if model:
+            # Set model parameters
+            model.conf = 0.25  # confidence threshold
+            model.iou = 0.45   # IoU threshold for NMS
+            model.max_det = 1000  # maximum detections per image
+            
+            # Get device info
+            device = next(model.model.parameters()).device
+            print(f"Model loaded on device: {device}")
         
     except Exception as e:
         print(f"Error loading model: {e}")
@@ -64,31 +56,12 @@ if YOLOV5_AVAILABLE:
 # Define class names mapping
 CLASS_NAMES = {
     0: 'missing_hole',
-    1: 'mouse_bite', 
-    2: 'open_circuit',
+    1: 'mouse_bite',
+    2: 'open_circuit', 
     3: 'short',
     4: 'spur',
     5: 'spurious_copper'
 }
-
-def preprocess_image(image, target_size=640):
-    """Preprocess image for YOLOv5 inference"""
-    # Convert PIL image to numpy array
-    img = np.array(image)
-    
-    # Letterbox resize (maintains aspect ratio)
-    img = letterbox(img, target_size, stride=32, auto=True)[0]
-    
-    # Convert to torch tensor
-    img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-    img = np.ascontiguousarray(img)
-    img = torch.from_numpy(img).to(device)
-    img = img.float() / 255.0  # Normalize to 0-1
-    
-    if img.ndimension() == 3:
-        img = img.unsqueeze(0)
-    
-    return img
 
 @app.route('/')
 def home():
@@ -126,49 +99,42 @@ def process_single_image(image_data, frontend_image_id, filename=None):
         original_width, original_height = image.size
         print(f"Processing image: {filename or frontend_image_id}, Original Size: {original_width}x{original_height}")
         
-        # Preprocess image
-        img_tensor = preprocess_image(image)
+        # Run inference using YOLOv5
+        results = model(image)
         
-        # Run inference
-        with torch.no_grad():
-            pred = model(img_tensor)
-        
-        # Apply NMS
-        pred = non_max_suppression(pred, conf_thres=0.25, iou_thres=0.45, max_det=1000)
-        
+        # Parse results
         detections = []
         
-        # Process detections
-        for i, det in enumerate(pred):
-            if len(det):
-                # Rescale boxes from img_size to original image size
-                det[:, :4] = scale_coords(img_tensor.shape[2:], det[:, :4], (original_height, original_width)).round()
-                
-                for *xyxy, conf, cls in det:
-                    x1, y1, x2, y2 = [float(x) for x in xyxy]
-                    confidence = float(conf)
-                    class_id = int(cls)
-                    class_name = CLASS_NAMES.get(class_id, f'unknown_{class_id}')
-                    
-                    # Optionally expand bounding box
-                    x1_exp, y1_exp, x2_exp, y2_exp = expand_bounding_box(
-                        (x1, y1, x2, y2), original_width, original_height
-                    )
-                    
-                    detection_data = {
-                        "class_id": class_id,
-                        "class": class_name,
-                        "confidence": confidence,
-                        "bbox": {
-                            "x1": float(x1_exp),
-                            "y1": float(y1_exp),
-                            "x2": float(x2_exp),
-                            "y2": float(y2_exp)
-                        }
-                    }
-                    
-                    detections.append(detection_data)
-                    print(f"  Detection: {class_name} at ({x1_exp:.1f}, {y1_exp:.1f}) to ({x2_exp:.1f}, {y2_exp:.1f}) with confidence {confidence:.3f}")
+        # results.pandas().xyxy[0] gives us a pandas DataFrame with detection results
+        for _, detection in results.pandas().xyxy[0].iterrows():
+            x1, y1, x2, y2 = detection['xmin'], detection['ymin'], detection['xmax'], detection['ymax']
+            confidence = detection['confidence']
+            class_id = int(detection['class'])
+            class_name = detection['name']
+            
+            # Use our custom class names if available
+            if class_id in CLASS_NAMES:
+                class_name = CLASS_NAMES[class_id]
+            
+            # Optionally expand bounding box
+            x1_exp, y1_exp, x2_exp, y2_exp = expand_bounding_box(
+                (x1, y1, x2, y2), original_width, original_height
+            )
+            
+            detection_data = {
+                "class_id": class_id,
+                "class": class_name,
+                "confidence": float(confidence),
+                "bbox": {
+                    "x1": float(x1_exp),
+                    "y1": float(y1_exp),
+                    "x2": float(x2_exp),
+                    "y2": float(y2_exp)
+                }
+            }
+            
+            detections.append(detection_data)
+            print(f"  Detection: {class_name} at ({x1_exp:.1f}, {y1_exp:.1f}) to ({x2_exp:.1f}, {y2_exp:.1f}) with confidence {confidence:.3f}")
         
         # Sort and limit detections
         max_detections_per_image = 20
@@ -201,7 +167,7 @@ def process_single_image(image_data, frontend_image_id, filename=None):
 def predict():
     """Handle image prediction requests"""
     if model is None:
-        return jsonify({"error": "Model not loaded. Check backend logs for details."}), 500
+        return jsonify({"error": "Model not loaded. Please ensure your model file (best.pt or last.pt) is uploaded to the server."}), 500
 
     results = []
     total_defects = 0
@@ -292,7 +258,7 @@ def predict():
             "processing_errors": processing_errors
         },
         "debug_info": {
-            "model_device": str(device),
+            "model_device": str(next(model.model.parameters()).device) if model else "unknown",
             "model_names": CLASS_NAMES,
             "total_results": len(results)
         }
