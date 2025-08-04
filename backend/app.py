@@ -28,25 +28,30 @@ model = None
 if YOLOV5_AVAILABLE:
     try:
         # Check for custom model files
+        model_path = None
         if os.path.exists('best.pt'):
-            model = yolov5.load('best.pt')
+            model_path = 'best.pt'
             print("Loaded custom model: best.pt")
         elif os.path.exists('last.pt'):
-            model = yolov5.load('last.pt')
+            model_path = 'last.pt'
             print("Loaded custom model: last.pt")
         else:
             # Fallback to a pretrained model for testing
             print("No custom model found. You need to upload your best.pt or last.pt file.")
-            model = None
-        
-        if model:
+
+        if model_path:
+            # Load the model with weights_only=False to prevent the PyTorch error
+            # Note: Only do this if you trust the source of the file.
+            checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+            model = checkpoint['model'].float()
+            
             # Set model parameters
             model.conf = 0.25  # confidence threshold
             model.iou = 0.45   # IoU threshold for NMS
-            model.max_det = 1000  # maximum detections per image
-            
+            model.max_det = 5  # maximum detections per image
+
             # Get device info
-            device = next(model.model.parameters()).device
+            device = next(model.parameters()).device
             print(f"Model loaded on device: {device}")
         
     except Exception as e:
