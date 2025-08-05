@@ -21,7 +21,7 @@ except ImportError as e:
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/predict": {"origins": "https://neural-pcb-project.vercel.app"}})
 
 # Load YOLOv5 model
 model = None
