@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Camera, AlertCircle, CheckCircle, Loader2, X, Zap, Eye, Target, BarChart3, Download, Plus, Image as ImageIcon, ZoomIn, FileText } from 'lucide-react';
+import { Camera, AlertCircle, CheckCircle, Loader2, X, Zap, Eye, Target, BarChart3, Download, Plus, Image as ImageIcon, ZoomIn, FileText, WifiOff } from 'lucide-react';
 
 const defectDescriptions = {
   missing_hole: 'A hole that should be present in the PCB is missing',
@@ -20,12 +20,13 @@ const PCBDefectDetector = () => {
   const [summary, setSummary] = useState({});
   const [showCamera, setShowCamera] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
-  const [selectedImage, setSelectedImage] = useState(null); // For modal view
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [backendStatus, setBackendStatus] = useState('unknown'); // 'online', 'offline', 'unknown'
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
-  const canvasRef = useRef(null); // Main canvas for camera capture and general use
-  const imageRefs = useRef({}); // To store references to individual image elements for bounding box calculation
-  const modalImageRef = useRef(null); // Reference for the image in the modal
+  const canvasRef = useRef(null);
+  const imageRefs = useRef({});
+  const modalImageRef = useRef(null);
 
   const defectColors = {
     missing_hole: '#FF6B6B',
@@ -36,6 +37,31 @@ const PCBDefectDetector = () => {
     spurious_copper: '#F7DC6F'
   };
 
+  // Check backend status on component mount
+  useEffect(() => {
+    checkBackendStatus();
+  }, []);
+
+  const checkBackendStatus = async () => {
+    try {
+      const response = await fetch('https://neuralpcb-final.onrender.com/health', {
+        method: 'GET',
+        mode: 'cors',
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setBackendStatus('online');
+        console.log('Backend health check:', data);
+      } else {
+        setBackendStatus('offline');
+      }
+    } catch (err) {
+      console.error('Backend health check failed:', err);
+      setBackendStatus('offline');
+    }
+  };
+
   // Camera functions
   const startCamera = async () => {
     try {
@@ -43,7 +69,7 @@ const PCBDefectDetector = () => {
         video: { 
           width: { ideal: 1280 }, 
           height: { ideal: 720 },
-          facingMode: 'environment' // Prioritize rear camera on mobile
+          facingMode: 'environment'
         } 
       });
       setCameraStream(stream);
@@ -77,18 +103,17 @@ const PCBDefectDetector = () => {
       
       const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8);
       const newImage = {
-        id: `camera_${Date.now()}`, // Unique ID for camera capture
+        id: `camera_${Date.now()}`,
         src: imageDataUrl,
         name: `Camera_Capture_${new Date().toLocaleTimeString()}`,
         type: 'camera'
       };
       
       setImages(prev => [...prev, newImage]);
-      stopCamera(); // Stop camera after capturing
+      stopCamera();
     }
   };
 
-  // Cleanup camera stream on component unmount or stream change
   useEffect(() => {
     return () => {
       if (cameraStream) {
@@ -104,10 +129,10 @@ const PCBDefectDetector = () => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const newImage = {
-          id: `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Unique ID for uploaded image
-          src: e.target.result, // Base64 data URL for preview
+          id: `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          src: e.target.result,
           name: file.name,
-          file: file, // Keep the original File object for FormData upload
+          file: file,
           type: 'upload'
         };
         setImages(prev => [...prev, newImage]);
@@ -115,7 +140,6 @@ const PCBDefectDetector = () => {
       reader.readAsDataURL(file);
     });
     
-    // Clear previous results when new images are added
     setResults([]);
     setError(null);
     setProcessingTime(0);
@@ -130,6 +154,12 @@ const PCBDefectDetector = () => {
   const detectDefects = async () => {
     if (images.length === 0) return;
 
+    // Check backend status first
+    if (backendStatus === 'offline') {
+      setError('Backend server appears to be offline. Please wait a moment and try again, or contact support.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setProcessingTime(0);
@@ -140,34 +170,32 @@ const PCBDefectDetector = () => {
       let response;
       let requestBody;
 
-      // Render backend URL
-      const backendUrl = 'https://neuralpcb-final.onrender.com/predict'; // Replaced with your Render URL
+      const backendUrl = 'https://neuralpcb-final.onrender.com/predict';
 
-      // Determine if there are any camera images (base64) or only file uploads
       const hasCameraImages = images.some(img => img.type === 'camera');
 
       if (hasCameraImages || images.some(img => img.type === 'upload' && !img.file)) {
-        // If any camera image or if an uploaded image is already base64 (e.g., from a previous session, though not typical here)
-        // Send all images as a JSON array of base64 data to simplify backend handling of mixed types.
         requestBody = {
           images_data: images.map(img => ({
             id: img.id,
             name: img.name,
-            src: img.src // This will be base64 for camera, or dataURL for uploaded images
+            src: img.src
           }))
         };
-        console.log('Sending JSON request to backend:', requestBody); // Debugging
+        console.log('Sending JSON request to backend with', images.length, 'images');
+        
         response = await fetch(backendUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
           },
+          mode: 'cors',
           body: JSON.stringify(requestBody),
         });
       } else {
-        // If only file uploads (original File objects), use FormData
         const formData = new FormData();
-        const imageMetadata = []; // To send image IDs and names for mapping
+        const imageMetadata = [];
 
         images.forEach((img) => {
           if (img.type === 'upload' && img.file) {
@@ -175,31 +203,45 @@ const PCBDefectDetector = () => {
             imageMetadata.push({ id: img.id, name: img.name });
           }
         });
-        // Append the metadata as a JSON string
         formData.append('image_metadata', JSON.stringify(imageMetadata));
-        console.log('Sending FormData request to backend.'); // Debugging
+        console.log('Sending FormData request to backend with', images.length, 'images');
 
         response = await fetch(backendUrl, {
           method: 'POST',
+          mode: 'cors',
           body: formData,
         });
       }
 
-      const data = await response.json();
-      console.log('Backend response:', data); // Debugging
-
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to process the images');
+        const errorText = await response.text();
+        throw new Error(`Server returned ${response.status}: ${errorText}`);
       }
+
+      const data = await response.json();
+      console.log('Backend response:', data);
 
       const endTime = performance.now();
       setProcessingTime(((endTime - startTime) / 1000).toFixed(2));
       setResults(data.results || []);
       setSummary(data.summary || {});
+      setBackendStatus('online'); // Backend responded successfully
 
     } catch (err) {
-      console.error('Error during defect detection:', err); // More detailed error logging
-      setError(err.message || 'Failed to connect to the backend. Make sure the Flask server is running and accessible.');
+      console.error('Error during defect detection:', err);
+      
+      // Set backend status based on error type
+      if (err.message.includes('Failed to fetch') || err.message.includes('ERR_FAILED')) {
+        setBackendStatus('offline');
+        setError('Unable to connect to the analysis server. The server may be starting up or experiencing issues. Please wait a moment and try again.');
+      } else if (err.message.includes('502') || err.message.includes('503')) {
+        setBackendStatus('offline');
+        setError('The analysis server is temporarily unavailable (502/503 error). Please wait a few minutes and try again.');
+      } else if (err.message.includes('CORS')) {
+        setError('Connection blocked by browser security policy. Please contact support.');
+      } else {
+        setError(err.message || 'An unexpected error occurred during analysis.');
+      }
     } finally {
       setLoading(false);
     }
@@ -212,42 +254,31 @@ const PCBDefectDetector = () => {
     setProcessingTime(0);
     setSummary({});
     if (fileInputRef.current) {
-      fileInputRef.current.value = ''; // Clear file input
+      fileInputRef.current.value = '';
     }
-    stopCamera(); // Stop camera if active
+    stopCamera();
   };
 
-  // Bounding Box Overlay Component - Renders bounding boxes on an image
+  // Bounding Box Overlay Component
   const BoundingBoxOverlay = ({ imageId, predictions, imageDimensions, isModal = false }) => {
     const [boxes, setBoxes] = useState([]);
 
     useEffect(() => {
-      // Get the correct image element reference (either from grid or modal)
       const imageElement = isModal ? modalImageRef.current : imageRefs.current[imageId];
       
-      // If bounding boxes are hidden, no image element, no dimensions, or no predictions, clear boxes
       if (!showBoundingBoxes || !imageElement || !imageDimensions || !predictions || predictions.length === 0) {
         setBoxes([]);
         return;
       }
 
       const updateBoxes = () => {
-        // Ensure image is fully loaded and has natural dimensions
         if (!imageElement.complete || imageElement.naturalWidth === 0 || imageDimensions.width === 0 || imageDimensions.height === 0) {
-          console.log("Image not ready or dimensions missing for BoundingBoxOverlay:", {
-            complete: imageElement.complete,
-            naturalWidth: imageElement.naturalWidth,
-            naturalHeight: imageElement.naturalHeight,
-            imageDimensions
-          });
           return;
         }
 
         const naturalWidth = imageDimensions.width;
         const naturalHeight = imageDimensions.height;
         
-        // Get the actual rendered dimensions of the image content within the <img> tag
-        // This accounts for object-fit: contain and any letterboxing/pillarboxing
         const imgRect = imageElement.getBoundingClientRect();
         const imgDisplayWidth = imgRect.width;
         const imgDisplayHeight = imgRect.height;
@@ -261,30 +292,17 @@ const PCBDefectDetector = () => {
         const containerAspectRatio = imgDisplayWidth / imgDisplayHeight;
 
         if (containerAspectRatio > imageAspectRatio) {
-          // Container is wider than image, image height is constrained
           renderedImageHeight = imgDisplayHeight;
           renderedImageWidth = imgDisplayHeight * imageAspectRatio;
-          offsetX = (imgDisplayWidth - renderedImageWidth) / 2; // Calculate horizontal offset
+          offsetX = (imgDisplayWidth - renderedImageWidth) / 2;
         } else {
-          // Container is taller than image, image width is constrained
           renderedImageWidth = imgDisplayWidth;
           renderedImageHeight = imgDisplayWidth / imageAspectRatio;
-          offsetY = (imgDisplayHeight - renderedImageHeight) / 2; // Calculate vertical offset
+          offsetY = (imgDisplayHeight - renderedImageHeight) / 2;
         }
 
-        // Calculate scale factors from natural (original) size to rendered content size
         const scaleX = renderedImageWidth / naturalWidth;
         const scaleY = renderedImageHeight / naturalHeight;
-
-        console.log('BoundingBox Debug (Precise):', {
-          imageId,
-          naturalSize: { width: naturalWidth, height: naturalHeight },
-          containerSize: { width: imgDisplayWidth, height: imgDisplayHeight },
-          renderedImageSize: { width: renderedImageWidth, height: renderedImageHeight },
-          offset: { offsetX, offsetY },
-          scale: { scaleX, scaleY },
-          predictionsCount: predictions.length
-        });
 
         const newBoxes = predictions.map((detection, index) => {
           const box = detection.bbox || detection.location || {};
@@ -294,7 +312,6 @@ const PCBDefectDetector = () => {
           const x2 = parseFloat(box.x2) || 0;
           const y2 = parseFloat(box.y2) || 0;
 
-          // Apply scaling and offset
           const scaledBox = {
             id: index,
             left: (x1 * scaleX) + offsetX,
@@ -305,56 +322,37 @@ const PCBDefectDetector = () => {
             confidence: detection.confidence || 0
           };
 
-          console.log(`Detection ${index}:`, {
-            original: { x1, y1, x2, y2 },
-            scaled: {
-              left: scaledBox.left,
-              top: scaledBox.top,
-              width: scaledBox.width,
-              height: scaledBox.height
-            },
-            class: scaledBox.class,
-            confidence: scaledBox.confidence
-          });
-
           return scaledBox;
         });
 
         setBoxes(newBoxes);
       };
 
-      // Debounce the update function to prevent excessive recalculations during resize/load
       let timeoutId;
       const debouncedUpdate = () => {
         clearTimeout(timeoutId);
-        timeoutId = setTimeout(updateBoxes, 100); // Small delay to allow DOM reflow
+        timeoutId = setTimeout(updateBoxes, 100);
       };
 
-      // Initial update when component mounts or dependencies change
       if (imageElement.complete && imageElement.naturalWidth > 0 && imageDimensions.width > 0) {
         updateBoxes();
       } else {
-        // If image is not yet loaded, listen for its 'load' event
         imageElement.addEventListener('load', updateBoxes);
       }
 
-      // Use ResizeObserver to detect changes in image element's size (e.g., due to responsive layout)
       const resizeObserver = new ResizeObserver(debouncedUpdate);
       resizeObserver.observe(imageElement);
       
-      // Listen for window resize events (e.g., when browser window is resized)
       window.addEventListener('resize', debouncedUpdate);
 
-      // Cleanup function for useEffect
       return () => {
         clearTimeout(timeoutId);
-        resizeObserver.disconnect(); // Disconnect observer
-        window.removeEventListener('resize', debouncedUpdate); // Remove window resize listener
-        imageElement.removeEventListener('load', updateBoxes); // Remove image load listener
+        resizeObserver.disconnect();
+        window.removeEventListener('resize', debouncedUpdate);
+        imageElement.removeEventListener('load', updateBoxes);
       };
-    }, [imageId, predictions, imageDimensions, isModal, showBoundingBoxes]); // Dependencies for useEffect
+    }, [imageId, predictions, imageDimensions, isModal, showBoundingBoxes]);
 
-    // Don't render anything if bounding boxes are hidden or no boxes to draw
     if (!showBoundingBoxes || boxes.length === 0) {
       return null;
     }
@@ -370,20 +368,19 @@ const PCBDefectDetector = () => {
               top: `${box.top}px`,
               width: `${box.width}px`,
               height: `${box.height}px`,
-              border: `3px solid ${defectColors[box.class] || '#FF0000'}`, // Use defect-specific color
-              backgroundColor: `${defectColors[box.class] || '#FF0000'}20`, // Semi-transparent fill
+              border: `3px solid ${defectColors[box.class] || '#FF0000'}`,
+              backgroundColor: `${defectColors[box.class] || '#FF0000'}20`,
               borderRadius: '3px',
-              pointerEvents: 'none', // Allow clicks to pass through to the image
-              zIndex: 10, // Ensure boxes are on top
-              boxSizing: 'border-box', // Include padding/border in width/height
-              animation: 'pulse 2s infinite' // Simple pulse animation
+              pointerEvents: 'none',
+              zIndex: 10,
+              boxSizing: 'border-box',
+              animation: 'pulse 2s infinite'
             }}
           >
-            {/* Label for the bounding box */}
             <div
               style={{
                 position: 'absolute',
-                top: '-25px', // Position above the box
+                top: '-25px',
                 left: '0',
                 backgroundColor: defectColors[box.class] || '#FF0000',
                 color: '#fff',
@@ -391,14 +388,14 @@ const PCBDefectDetector = () => {
                 fontSize: '11px',
                 fontWeight: 'bold',
                 borderRadius: '3px',
-                whiteSpace: 'nowrap', // Prevent text wrapping
+                whiteSpace: 'nowrap',
                 boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
-                maxWidth: '200px', // Limit label width
+                maxWidth: '200px',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis'
               }}
             >
-              {box.class.replace('_', ' ')} ${(box.confidence * 100).toFixed(0)}%
+              {box.class.replace('_', ' ')} {(box.confidence * 100).toFixed(0)}%
             </div>
           </div>
         ))}
@@ -406,11 +403,10 @@ const PCBDefectDetector = () => {
     );
   };
 
-  // Image Modal Component - Displays a larger view of a selected image with bounding boxes
+  // Image Modal Component
   const ImageModal = () => {
-    if (!selectedImage) return null; // Don't render if no image is selected
+    if (!selectedImage) return null;
 
-    // Find the detection results for the selected image
     const imageResult = results.find(r => r.image_id === selectedImage.id);
 
     return (
@@ -420,13 +416,13 @@ const PCBDefectDetector = () => {
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.9)', // Dark overlay
+        backgroundColor: 'rgba(0, 0, 0, 0.9)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 1000, // High z-index to be on top
+        zIndex: 1000,
         padding: '20px'
-      }} onClick={() => setSelectedImage(null)}> {/* Close modal on overlay click */}
+      }} onClick={() => setSelectedImage(null)}>
         <div style={{
           position: 'relative',
           maxWidth: '90vw',
@@ -436,9 +432,8 @@ const PCBDefectDetector = () => {
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column'
-        }} onClick={(e) => e.stopPropagation()}> {/* Prevent closing when clicking inside modal */}
+        }} onClick={(e) => e.stopPropagation()}>
           
-          {/* Modal Header */}
           <div style={{
             padding: '15px 20px',
             backgroundColor: '#f8f9fa',
@@ -483,11 +478,10 @@ const PCBDefectDetector = () => {
             </div>
           </div>
 
-          {/* Image Container within Modal */}
           <div style={{
             position: 'relative',
-            maxHeight: 'calc(90vh - 140px)', // Adjust based on header/footer height
-            overflow: 'auto', // Allow scrolling if image is too large
+            maxHeight: 'calc(90vh - 140px)',
+            overflow: 'auto',
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
@@ -496,46 +490,42 @@ const PCBDefectDetector = () => {
           }}>
             <div style={{ position: 'relative', display: 'inline-block' }}>
               <img
-                ref={modalImageRef} // Reference for the modal image
+                ref={modalImageRef}
                 src={selectedImage.src}
                 alt={selectedImage.name}
                 style={{
                   maxWidth: '100%',
-                  maxHeight: '70vh', // Limit height to fit screen
+                  maxHeight: '70vh',
                   objectFit: 'contain',
                   borderRadius: '8px'
                 }}
                 onLoad={() => {
-                  // Force bounding box recalculation after image loads in modal
-                  // This ensures getBoundingClientRect has correct values
                   setTimeout(() => {
                     if (modalImageRef.current) {
-                      const event = new Event('load'); // Trigger a custom load event
+                      const event = new Event('load');
                       modalImageRef.current.dispatchEvent(event);
                     }
                   }, 200);
                 }}
               />
               
-              {/* Bounding Box Overlay for the modal image */}
               {imageResult && imageResult.predictions && (
                 <BoundingBoxOverlay
                   imageId={selectedImage.id}
                   predictions={imageResult.predictions}
                   imageDimensions={imageResult.image_dimensions}
-                  isModal={true} // Indicate this is for the modal
+                  isModal={true}
                 />
               )}
             </div>
           </div>
 
-          {/* Detection Details in Modal Footer */}
           {imageResult && imageResult.predictions && imageResult.predictions.length > 0 && (
             <div style={{
               padding: '20px',
               backgroundColor: '#f8f9fa',
               borderTop: '1px solid #e9ecef',
-              maxHeight: '200px', // Limit height for scrollability
+              maxHeight: '200px',
               overflowY: 'auto',
               flexShrink: 0
             }}>
@@ -574,7 +564,7 @@ const PCBDefectDetector = () => {
                         {detection.class?.replace('_', ' ')}
                       </div>
                       <div style={{ fontSize: '0.8rem', color: '#666' }}>
-                        Confidence: ${(detection.confidence * 100).toFixed(1)}%
+                        Confidence: {(detection.confidence * 100).toFixed(1)}%
                       </div>
                     </div>
                   </div>
@@ -587,12 +577,10 @@ const PCBDefectDetector = () => {
     );
   };
 
-  // Helper to get overall defect statistics
   const getOverallStats = () => {
     return summary.defect_breakdown || {};
   };
 
-  // Function to download JSON report
   const downloadReport = () => {
     const report = {
       timestamp: new Date().toISOString(),
@@ -620,84 +608,6 @@ const PCBDefectDetector = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Function to draw image with bounding boxes on a canvas and return data URL
-  const drawImageWithBoxesToCanvas = async (imageSrc, predictions, imageDimensions) => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.src = imageSrc;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-
-        // Set canvas dimensions to original image dimensions
-        canvas.width = imageDimensions.width;
-        canvas.height = imageDimensions.height;
-
-        // Draw the original image
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        // Draw bounding boxes
-        if (predictions && predictions.length > 0) {
-          predictions.forEach(detection => {
-            const box = detection.bbox || detection.location || {};
-            const x1 = parseFloat(box.x1) || 0;
-            const y1 = parseFloat(box.y1) || 0;
-            const x2 = parseFloat(box.x2) || 0;
-            const y2 = parseFloat(box.y2) || 0;
-
-            const defectClass = detection.class || detection.type || 'unknown';
-            const color = defectColors[defectClass] || '#FF0000';
-
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 3;
-            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-
-            // Draw label background
-            ctx.fillStyle = color;
-            const labelText = `${defectClass.replace('_', ' ')} ${(detection.confidence * 100).toFixed(0)}%`;
-            const fontSize = 20;
-            ctx.font = `${fontSize}px Arial`; // Use a standard font for canvas drawing
-            const textMetrics = ctx.measureText(labelText);
-            const textWidth = textMetrics.width;
-            const textHeight = fontSize * 1.2; // Approximate height with some padding
-
-            ctx.fillRect(x1, y1 - textHeight, textWidth + 10, textHeight); // Background rectangle
-
-            // Draw label text
-            ctx.fillStyle = '#fff';
-            ctx.fillText(labelText, x1 + 5, y1 - 5); // Text slightly above the box
-          });
-        }
-        resolve(canvas.toDataURL('image/png'));
-      };
-      img.onerror = () => {
-        console.error("Failed to load image for canvas drawing:", imageSrc);
-        resolve(null); // Resolve with null on error
-      };
-    });
-  };
-
-  // Function to download an individual image with bounding boxes
-  const downloadImageWithBoxes = async (image, imageResult) => {
-    if (!imageResult || !imageResult.predictions || !imageResult.image_dimensions) {
-      alert('No detection results available for this image to download with bounding boxes.');
-      return;
-    }
-
-    const dataUrl = await drawImageWithBoxesToCanvas(image.src, imageResult.predictions, imageResult.image_dimensions);
-    if (dataUrl) {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `${image.name.split('.')[0]}_defects.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } else {
-      alert('Failed to generate image with bounding boxes.');
-    }
-  };
-
-  // Function to download a human-readable text report
   const downloadDocumentReport = () => {
     let documentContent = `PCB DEFECT DETECTION REPORT\n`;
     documentContent += `Generated on: ${new Date().toLocaleString()}\n`;
@@ -705,7 +615,6 @@ const PCBDefectDetector = () => {
     documentContent += `Total Images Processed: ${images.length}\n`;
     documentContent += `Total Defects Found: ${summary.total_defects_found || 0}\n\n`;
     
-    // Overall Statistics
     documentContent += `OVERALL DEFECT STATISTICS:\n`;
     documentContent += `${'-'.repeat(50)}\n`;
     const overallStats = getOverallStats();
@@ -714,7 +623,6 @@ const PCBDefectDetector = () => {
     });
     documentContent += `\n`;
 
-    // Individual Image Results
     documentContent += `DETAILED IMAGE ANALYSIS:\n`;
     documentContent += `${'='.repeat(50)}\n\n`;
 
@@ -746,7 +654,6 @@ const PCBDefectDetector = () => {
       documentContent += `\n`;
     });
 
-    // Defect Type Descriptions
     documentContent += `DEFECT TYPE DESCRIPTIONS:\n`;
     documentContent += `${'='.repeat(50)}\n`;
     Object.entries(defectDescriptions).forEach(([type, description]) => {
@@ -754,7 +661,6 @@ const PCBDefectDetector = () => {
       documentContent += `  ${description}\n\n`;
     });
 
-    // Create and download the document
     const blob = new Blob([documentContent], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -768,7 +674,7 @@ const PCBDefectDetector = () => {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', // Gradient background
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       color: '#333'
     }}>
@@ -783,7 +689,7 @@ const PCBDefectDetector = () => {
               fontSize: '2.5rem', 
               fontWeight: '800', 
               margin: '0',
-              background: 'linear-gradient(45deg, #fff, #f0f0f0)', // Text gradient
+              background: 'linear-gradient(45deg, #fff, #f0f0f0)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent'
             }}>
@@ -793,6 +699,51 @@ const PCBDefectDetector = () => {
           <p style={{ fontSize: '1.1rem', opacity: '0.9', maxWidth: '600px', margin: '0 auto', lineHeight: '1.6' }}>
             Advanced AI-powered PCB quality control system. Upload multiple PCB images or use camera to detect manufacturing defects.
           </p>
+          
+          {/* Backend Status Indicator */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            gap: '8px', 
+            marginTop: '15px',
+            padding: '8px 15px',
+            background: backendStatus === 'online' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+            borderRadius: '20px',
+            fontSize: '0.9rem',
+            fontWeight: '600'
+          }}>
+            {backendStatus === 'online' ? (
+              <>
+                <CheckCircle size={16} />
+                Analysis Server Online
+              </>
+            ) : backendStatus === 'offline' ? (
+              <>
+                <WifiOff size={16} />
+                Analysis Server Offline
+              </>
+            ) : (
+              <>
+                <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                Checking Server Status...
+              </>
+            )}
+            <button 
+              onClick={checkBackendStatus}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '2px 6px',
+                color: 'white',
+                cursor: 'pointer',
+                fontSize: '0.8rem'
+              }}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
 
         {/* Main Content Grid */}
@@ -890,7 +841,15 @@ const PCBDefectDetector = () => {
               {error && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fed7d7', color: '#c53030', padding: '12px', borderRadius: '8px', marginBottom: '15px' }} className="error-message">
                   <AlertCircle size={20} />
-                  {error}
+                  <div>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>Connection Error</div>
+                    <div style={{ fontSize: '0.9rem' }}>{error}</div>
+                    {backendStatus === 'offline' && (
+                      <div style={{ fontSize: '0.8rem', marginTop: '4px', opacity: '0.8' }}>
+                        Tip: Try refreshing the server status or wait a few minutes for the server to start up.
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -914,22 +873,31 @@ const PCBDefectDetector = () => {
                 </div>
               )}
 
-              <canvas ref={canvasRef} style={{ display: 'none' }} /> {/* Hidden canvas for photo capture */}
+              <canvas ref={canvasRef} style={{ display: 'none' }} />
 
               {/* Detect Button */}
               {images.length > 0 && (
                 <div style={{ textAlign: 'center' }} className="detect-button-container">
-                  <button onClick={detectDefects} disabled={loading} style={{
-                    display: 'flex', alignItems: 'center', gap: '10px', padding: '15px 30px',
-                    background: loading ? '#9ca3af' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    color: 'white', borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer',
-                    fontWeight: '700', fontSize: '1.1rem', border: 'none', margin: '0 auto',
-                    transition: 'background-color 0.3s ease'
-                  }} className="detect-button">
+                  <button 
+                    onClick={detectDefects} 
+                    disabled={loading || backendStatus === 'offline'} 
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '10px', padding: '15px 30px',
+                      background: loading || backendStatus === 'offline' ? '#9ca3af' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      color: 'white', borderRadius: '12px', 
+                      cursor: loading || backendStatus === 'offline' ? 'not-allowed' : 'pointer',
+                      fontWeight: '700', fontSize: '1.1rem', border: 'none', margin: '0 auto',
+                      transition: 'background-color 0.3s ease'
+                    }} className="detect-button">
                     {loading ? (
                       <>
                         <Loader2 style={{ animation: 'spin 1s linear infinite' }} size={20} />
                         Analyzing {images.length} image{images.length > 1 ? 's' : ''}...
+                      </>
+                    ) : backendStatus === 'offline' ? (
+                      <>
+                        <WifiOff size={20} />
+                        Server Offline - Cannot Analyze
                       </>
                     ) : (
                       <>
@@ -938,6 +906,11 @@ const PCBDefectDetector = () => {
                       </>
                     )}
                   </button>
+                  {backendStatus === 'offline' && images.length > 0 && (
+                    <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '8px', textAlign: 'center' }}>
+                      The analysis server is currently unavailable. Please check the status above and try again.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -948,7 +921,7 @@ const PCBDefectDetector = () => {
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
                 gap: '15px',
-                maxHeight: '500px', // Fixed height with scroll for many images
+                maxHeight: '500px',
                 overflowY: 'auto',
                 padding: '15px',
                 background: 'rgba(255, 255, 255, 0.1)',
@@ -956,7 +929,7 @@ const PCBDefectDetector = () => {
                 boxShadow: '0 4px 15px rgba(0,0,0,0.1)'
               }} className="images-grid">
                 {images.map((image) => {
-                  const imageResult = results.find(r => r.image_id === image.id); // Find results for this specific image
+                  const imageResult = results.find(r => r.image_id === image.id);
                   return (
                     <div key={image.id} style={{
                       background: 'white',
@@ -971,32 +944,10 @@ const PCBDefectDetector = () => {
                           {image.name}
                         </h4>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} className="image-card-actions">
-                          {imageResult && imageResult.predictions && imageResult.predictions.length > 0 && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation(); // Prevent opening modal on button click
-                                downloadImageWithBoxes(image, imageResult);
-                              }}
-                              style={{
-                                background: '#e0f7fa',
-                                color: '#00796b',
-                                border: 'none',
-                                borderRadius: '6px',
-                                padding: '4px',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                transition: 'background-color 0.2s ease'
-                              }}
-                              title="Download image with boxes"
-                            >
-                              <Download size={14} />
-                            </button>
-                          )}
                           <button
                             onClick={(e) => {
-                              e.stopPropagation(); // Prevent opening modal on button click
-                              setSelectedImage(image); // Open modal with this image
+                              e.stopPropagation();
+                              setSelectedImage(image);
                             }}
                             style={{
                               background: '#e3f2fd',
@@ -1014,8 +965,8 @@ const PCBDefectDetector = () => {
                             <ZoomIn size={14} />
                           </button>
                           <button onClick={(e) => {
-                            e.stopPropagation(); // Prevent opening modal on button click
-                            removeImage(image.id); // Remove this image
+                            e.stopPropagation();
+                            removeImage(image.id);
                           }} style={{
                             background: '#f8d7da', color: '#721c24', border: 'none', borderRadius: '6px',
                             padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center',
@@ -1028,36 +979,33 @@ const PCBDefectDetector = () => {
                       
                       <div 
                         style={{ position: 'relative', height: '150px', overflow: 'hidden' }}
-                        onClick={() => setSelectedImage(image)} // Open modal on image click
+                        onClick={() => setSelectedImage(image)}
                       >
                         <img
-                          ref={el => imageRefs.current[image.id] = el} // Store ref for this image
+                          ref={el => imageRefs.current[image.id] = el}
                           src={image.src}
                           alt={image.name}
                           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                           onLoad={() => {
-                            // Force bounding box recalculation after image loads
                             setTimeout(() => {
                               const imageElement = imageRefs.current[image.id];
                               if (imageElement) {
-                                const event = new Event('load'); // Trigger a custom load event
+                                const event = new Event('load');
                                 imageElement.dispatchEvent(event);
                               }
                             }, 200);
                           }}
                         />
                         
-                        {/* Render BoundingBoxOverlay if results are available for this image */}
                         {imageResult && imageResult.predictions && (
                           <BoundingBoxOverlay
                             imageId={image.id}
                             predictions={imageResult.predictions}
                             imageDimensions={imageResult.image_dimensions}
-                            isModal={false} // Indicate this is for the grid view
+                            isModal={false}
                           />
                         )}
                         
-                        {/* Display defect count badge */}
                         {imageResult && (
                           <div style={{ 
                             position: 'absolute', 
