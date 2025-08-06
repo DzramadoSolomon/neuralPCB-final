@@ -1,6 +1,5 @@
 flask==3.0.3
 flask-cors==5.0.0
-torch==2.7.1 # Updated to a version available on PyPI
 torchvision==0.21.0 # Updated to an available version compatible with torch 2.7.1
 Pillow==10.4.0
 numpy==1.26.4
