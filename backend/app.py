@@ -9,7 +9,7 @@ import os
 import json
 import uuid
 import logging
-import sys # Import sys for exiting on critical errors
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,8 +24,7 @@ except ImportError as e:
     logger.critical(f"CRITICAL ERROR: Failed to import YOLOv5 package: {e}")
     logger.critical("Please ensure yolov5 is installed. Render build might be failing.")
     YOLOV5_AVAILABLE = False
-    # If YOLOv5 isn't available, there's no point in continuing, so exit
-    sys.exit(1) # Exit immediately if yolov5 cannot be imported
+    sys.exit(1)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -38,7 +37,7 @@ CORS(app,
              "methods": ["GET", "POST", "OPTIONS"],
              "allow_headers": ["Content-Type", "Authorization"]
          },
-         r"/health": { # Explicitly add /health to CORS
+         r"/health": {
              "origins": ["https://neural-pcb-project.vercel.app", "http://localhost:3000", "http://127.0.0.1:3000"],
              "methods": ["GET", "OPTIONS"],
              "allow_headers": ["Content-Type", "Authorization"]
@@ -48,7 +47,7 @@ CORS(app,
 
 # Load YOLOv5 model
 model = None
-CLASS_NAMES = {} # Initialize CLASS_NAMES to avoid NameError
+CLASS_NAMES = {}
 
 if YOLOV5_AVAILABLE:
     logger.info("Attempting to load YOLOv5 model...")
@@ -62,31 +61,26 @@ if YOLOV5_AVAILABLE:
             logger.info("Found custom model: last.pt")
         else:
             logger.warning("No custom model found (best.pt or last.pt). Attempting to use pretrained YOLOv5s as fallback.")
-            model_path = 'yolov5s.pt'  # This will be downloaded automatically by yolov5.load()
+            model_path = 'yolov5s.pt'
 
         if model_path:
             logger.info(f"Loading model from path: {model_path}")
             try:
-                # Use the yolov5 package to load the model
                 model = yolov5.load(model_path)
                 
-                # Set model parameters
-                model.conf = 0.25  # confidence threshold
-                model.iou = 0.45   # IoU threshold for NMS
-                model.max_det = 20  # maximum detections per image
+                model.conf = 0.25
+                model.iou = 0.45
+                model.max_det = 20
                 
-                # Determine device and move model
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 model.to(device)
                 
                 logger.info(f"Model loaded successfully: {model_path} on device: {device}")
                 
-                # Attempt to get class names from the loaded model
                 if hasattr(model, 'names') and isinstance(model.names, dict):
                     CLASS_NAMES = model.names
                     logger.info(f"Model class names (from model.names): {CLASS_NAMES}")
                 else:
-                    # Fallback to hardcoded class names if model.names is not available or not a dict
                     CLASS_NAMES = {
                         0: 'missing_hole', 1: 'mouse_bite', 2: 'open_circuit',
                         3: 'short', 4: 'spur', 5: 'spurious_copper'
@@ -94,19 +88,18 @@ if YOLOV5_AVAILABLE:
                     logger.warning(f"Model.names not found or invalid. Using hardcoded class names: {CLASS_NAMES}")
 
             except Exception as load_error:
-                logger.critical(f"CRITICAL ERROR: Failed to load model with yolov5.load(): {load_error}", exc_info=True) # Log full traceback
+                logger.critical(f"CRITICAL ERROR: Failed to load model with yolov5.load(): {load_error}", exc_info=True)
                 model = None
         else:
             logger.critical("CRITICAL ERROR: No model path determined. Model will not be loaded.")
             model = None
         
     except Exception as e:
-        logger.critical(f"CRITICAL ERROR: General error during model loading block initialization: {e}", exc_info=True) # Log full traceback
+        logger.critical(f"CRITICAL ERROR: General error during model loading block initialization: {e}", exc_info=True)
         model = None
 else:
     logger.critical("CRITICAL ERROR: YOLOv5 not available (import failed). Model will not be loaded.")
 
-# If model loading failed, CLASS_NAMES might still be empty, ensure a default
 if not CLASS_NAMES:
     CLASS_NAMES = {
         0: 'missing_hole', 1: 'mouse_bite', 2: 'open_circuit',
@@ -150,6 +143,7 @@ def expand_bounding_box(bbox, image_width, image_height, expansion_factor=0.05):
 def process_single_image(image_data, frontend_image_id, filename=None):
     """Process a single image for defect detection using YOLOv5"""
     if model is None:
+        logger.error(f"Attempted to process image {filename or frontend_image_id} but model is not loaded.")
         return {
             "image_id": frontend_image_id,
             "error": "Model is not loaded, cannot process image.",
@@ -169,17 +163,16 @@ def process_single_image(image_data, frontend_image_id, filename=None):
         original_width, original_height = image.size
         logger.info(f"Processing image: {filename or frontend_image_id}, Size: {original_width}x{original_height}")
 
-        # Run inference using YOLOv5
-        # The model() call returns a list of results, one per image
-        results = model(image)
+        logger.info(f"STARTING model inference for {filename or frontend_image_id}...")
+        with torch.no_grad(): # Disable gradient calculations for inference to save memory
+            # THIS IS THE KEY LINE WE ARE WATCHING
+            results = model(image) 
+        logger.info(f"COMPLETED model inference for {filename or frontend_image_id}.")
         
         detections = []
         
-        # Parse results from the YOLOv5 model output
-        # results.pandas().xyxy[0] is typically for single image results
-        # If processing multiple images, you might iterate through results list
-        for r in results: # Iterate through each result object (one per image in batch)
-            df = r.pandas().xyxy[0] # Get pandas dataframe for detections in this result
+        for r in results:
+            df = r.pandas().xyxy[0]
             
             for _, detection in df.iterrows():
                 x1, y1, x2, y2 = detection['xmin'], detection['ymin'], detection['xmax'], detection['ymax']
@@ -187,11 +180,9 @@ def process_single_image(image_data, frontend_image_id, filename=None):
                 class_id = int(detection['class'])
                 class_name = detection['name']
                 
-                # Use our custom class names if available
                 if class_id in CLASS_NAMES:
                     class_name = CLASS_NAMES[class_id]
                 
-                # Optionally expand bounding box
                 x1_exp, y1_exp, x2_exp, y2_exp = expand_bounding_box(
                     (x1, y1, x2, y2), original_width, original_height
                 )
@@ -209,9 +200,8 @@ def process_single_image(image_data, frontend_image_id, filename=None):
                 }
                 
                 detections.append(detection_data)
-                logger.info(f"  Detection: {class_name} ({confidence:.3f}) at ({x1_exp:.1f}, {y1_exp:.1f}, {x2_exp:.1f}, {y2_exp:.1f})")
+                logger.debug(f"  Detection: {class_name} ({confidence:.3f}) at ({x1_exp:.1f}, {y1_exp:.1f}, {x2_exp:.1f}, {y2_exp:.1f})") # Use debug for verbose detection logs
         
-        # Sort by confidence and limit detections
         max_detections_per_image = 20
         detections = sorted(detections, key=lambda x: x['confidence'], reverse=True)[:max_detections_per_image]
         
@@ -229,7 +219,7 @@ def process_single_image(image_data, frontend_image_id, filename=None):
         return result
         
     except Exception as e:
-        logger.error(f"Error processing image {filename or frontend_image_id}: {str(e)}", exc_info=True) # Log full traceback
+        logger.critical(f"CRITICAL ERROR: Failed during image processing for {filename or frontend_image_id}: {str(e)}", exc_info=True)
         return {
             "image_id": frontend_image_id,
             "error": f"Processing failed: {str(e)}",
@@ -240,8 +230,6 @@ def process_single_image(image_data, frontend_image_id, filename=None):
 
 @app.route('/predict', methods=['POST', 'OPTIONS'])
 def predict():
-    """Handle image prediction requests"""
-    # Handle preflight OPTIONS request
     if request.method == 'OPTIONS':
         return '', 200
     
@@ -256,7 +244,6 @@ def predict():
     logger.info("--- Starting prediction request ---")
     
     try:
-        # Handle JSON array of image data
         if request.is_json and 'images_data' in request.json:
             images_data = request.json['images_data']
             logger.info(f"Received {len(images_data)} images from JSON data.")
@@ -274,7 +261,6 @@ def predict():
                 else:
                     processing_errors.append(f"Image '{image_name}' (ID: {frontend_id}): Missing image source data.")
 
-        # Handle FormData with multiple file uploads
         elif 'images' in request.files:
             files = request.files.getlist('images')
             image_metadata_json = request.form.get('image_metadata')
@@ -306,7 +292,6 @@ def predict():
                 else:
                     processing_errors.append(f"Skipping empty or invalid file at index {i}.")
         
-        # Handle single image upload (backward compatibility)
         elif 'image' in request.files:
             file = request.files['image']
             if file and file.filename:
@@ -324,7 +309,6 @@ def predict():
         if not results:
             return jsonify({"error": "No valid images were processed."}), 400
         
-        # Generate summary statistics
         defect_summary = {}
         for result in results:
             if 'error' not in result:
@@ -351,7 +335,7 @@ def predict():
         return jsonify(response_data), 200
         
     except Exception as e:
-        logger.critical(f"CRITICAL ERROR: Unexpected error in predict endpoint: {str(e)}", exc_info=True) # Log full traceback
+        logger.critical(f"CRITICAL ERROR: Unexpected error in predict endpoint: {str(e)}", exc_info=True)
         return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 if __name__ == '__main__':
