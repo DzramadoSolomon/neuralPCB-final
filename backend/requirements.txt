@@ -2,8 +2,8 @@ flask==3.0.3
 flask-cors==5.0.0
 Pillow==10.4.0
 numpy==1.26.4
-yolov5==6.2.0
+yolov5==7.0.13
 gunicorn==23.0.0
-huggingface-hub==0.17.3
-torch==2.2.0
-torchvision==0.17.0
+huggingface-hub
+torch==2.5.0
+torchvision==0.20.0
