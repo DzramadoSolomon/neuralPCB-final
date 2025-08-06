@@ -9,6 +9,7 @@ import os
 import json
 import uuid
 import logging
+import sys # Import sys for exiting on critical errors
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,11 +19,13 @@ logger = logging.getLogger(__name__)
 try:
     import yolov5
     YOLOV5_AVAILABLE = True
-    logger.info("YOLOv5 package imported successfully")
+    logger.info("YOLOv5 package imported successfully from pip.")
 except ImportError as e:
-    logger.error(f"Error importing YOLOv5: {e}")
-    logger.error("Please ensure yolov5 is installed. Run: pip install yolov5")
+    logger.critical(f"CRITICAL ERROR: Failed to import YOLOv5 package: {e}")
+    logger.critical("Please ensure yolov5 is installed. Render build might be failing.")
     YOLOV5_AVAILABLE = False
+    # If YOLOv5 isn't available, there's no point in continuing, so exit
+    sys.exit(1) # Exit immediately if yolov5 cannot be imported
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -34,18 +37,22 @@ CORS(app,
              "origins": ["https://neural-pcb-project.vercel.app", "http://localhost:3000", "http://127.0.0.1:3000"],
              "methods": ["GET", "POST", "OPTIONS"],
              "allow_headers": ["Content-Type", "Authorization"]
+         },
+         r"/health": { # Explicitly add /health to CORS
+             "origins": ["https://neural-pcb-project.vercel.app", "http://localhost:3000", "http://127.0.0.1:3000"],
+             "methods": ["GET", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization"]
          }
      },
      supports_credentials=True)
 
-# Alternative: More permissive CORS for debugging (use this if above doesn't work)
-# CORS(app, origins="*")
-
 # Load YOLOv5 model
 model = None
+CLASS_NAMES = {} # Initialize CLASS_NAMES to avoid NameError
+
 if YOLOV5_AVAILABLE:
+    logger.info("Attempting to load YOLOv5 model...")
     try:
-        # Check for custom model files
         model_path = None
         if os.path.exists('best.pt'):
             model_path = 'best.pt'
@@ -54,50 +61,59 @@ if YOLOV5_AVAILABLE:
             model_path = 'last.pt'
             logger.info("Found custom model: last.pt")
         else:
-            # Use a pretrained YOLOv5s model as fallback
-            logger.warning("No custom model found (best.pt or last.pt). Using pretrained YOLOv5s for testing.")
-            model_path = 'yolov5s.pt'  # This will be downloaded automatically
+            logger.warning("No custom model found (best.pt or last.pt). Attempting to use pretrained YOLOv5s as fallback.")
+            model_path = 'yolov5s.pt'  # This will be downloaded automatically by yolov5.load()
 
         if model_path:
+            logger.info(f"Loading model from path: {model_path}")
             try:
                 # Use the yolov5 package to load the model
                 model = yolov5.load(model_path)
+                
+                # Set model parameters
                 model.conf = 0.25  # confidence threshold
                 model.iou = 0.45   # IoU threshold for NMS
                 model.max_det = 20  # maximum detections per image
                 
-                logger.info(f"Model loaded successfully: {model_path}")
-                logger.info(f"Model device: {model.device}")
+                # Determine device and move model
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                model.to(device)
                 
-            except Exception as load_error:
-                logger.error(f"Error loading model with yolov5.load(): {load_error}")
-                # Fallback to torch.load for custom models
-                if model_path in ['best.pt', 'last.pt']:
-                    try:
-                        checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
-                        model = checkpoint['model'].float().eval()
-                        logger.info(f"Model loaded with torch.load(): {model_path}")
-                    except Exception as torch_error:
-                        logger.error(f"Failed to load with torch.load(): {torch_error}")
-                        model = None
+                logger.info(f"Model loaded successfully: {model_path} on device: {device}")
+                
+                # Attempt to get class names from the loaded model
+                if hasattr(model, 'names') and isinstance(model.names, dict):
+                    CLASS_NAMES = model.names
+                    logger.info(f"Model class names (from model.names): {CLASS_NAMES}")
                 else:
-                    model = None
+                    # Fallback to hardcoded class names if model.names is not available or not a dict
+                    CLASS_NAMES = {
+                        0: 'missing_hole', 1: 'mouse_bite', 2: 'open_circuit',
+                        3: 'short', 4: 'spur', 5: 'spurious_copper'
+                    }
+                    logger.warning(f"Model.names not found or invalid. Using hardcoded class names: {CLASS_NAMES}")
+
+            except Exception as load_error:
+                logger.critical(f"CRITICAL ERROR: Failed to load model with yolov5.load(): {load_error}", exc_info=True) # Log full traceback
+                model = None
+        else:
+            logger.critical("CRITICAL ERROR: No model path determined. Model will not be loaded.")
+            model = None
         
     except Exception as e:
-        logger.error(f"General error loading model: {e}")
+        logger.critical(f"CRITICAL ERROR: General error during model loading block initialization: {e}", exc_info=True) # Log full traceback
         model = None
 else:
-    logger.error("YOLOv5 not available, model will not be loaded")
+    logger.critical("CRITICAL ERROR: YOLOv5 not available (import failed). Model will not be loaded.")
 
-# Define class names mapping (update these based on your model)
-CLASS_NAMES = {
-    0: 'missing_hole',
-    1: 'mouse_bite', 
-    2: 'open_circuit',
-    3: 'short',
-    4: 'spur',
-    5: 'spurious_copper'
-}
+# If model loading failed, CLASS_NAMES might still be empty, ensure a default
+if not CLASS_NAMES:
+    CLASS_NAMES = {
+        0: 'missing_hole', 1: 'mouse_bite', 2: 'open_circuit',
+        3: 'short', 4: 'spur', 5: 'spurious_copper'
+    }
+    logger.warning("CLASS_NAMES was not populated from model, using default hardcoded names.")
+
 
 @app.route('/')
 def home():
@@ -133,6 +149,14 @@ def expand_bounding_box(bbox, image_width, image_height, expansion_factor=0.05):
 
 def process_single_image(image_data, frontend_image_id, filename=None):
     """Process a single image for defect detection using YOLOv5"""
+    if model is None:
+        return {
+            "image_id": frontend_image_id,
+            "error": "Model is not loaded, cannot process image.",
+            "predictions": [],
+            "image_dimensions": {"width": 0, "height": 0},
+            "total_detections": 0
+        }
     try:
         # Handle different image input types
         if isinstance(image_data, str) and image_data.startswith('data:image'):
@@ -146,43 +170,46 @@ def process_single_image(image_data, frontend_image_id, filename=None):
         logger.info(f"Processing image: {filename or frontend_image_id}, Size: {original_width}x{original_height}")
 
         # Run inference using YOLOv5
+        # The model() call returns a list of results, one per image
         results = model(image)
         
-        # Parse results
         detections = []
         
-        # Get results as pandas dataframe
-        df = results.pandas().xyxy[0]
-        
-        for _, detection in df.iterrows():
-            x1, y1, x2, y2 = detection['xmin'], detection['ymin'], detection['xmax'], detection['ymax']
-            confidence = detection['confidence']
-            class_id = int(detection['class'])
-            class_name = detection['name']
+        # Parse results from the YOLOv5 model output
+        # results.pandas().xyxy[0] is typically for single image results
+        # If processing multiple images, you might iterate through results list
+        for r in results: # Iterate through each result object (one per image in batch)
+            df = r.pandas().xyxy[0] # Get pandas dataframe for detections in this result
             
-            # Use our custom class names if available
-            if class_id in CLASS_NAMES:
-                class_name = CLASS_NAMES[class_id]
-            
-            # Optionally expand bounding box
-            x1_exp, y1_exp, x2_exp, y2_exp = expand_bounding_box(
-                (x1, y1, x2, y2), original_width, original_height
-            )
-            
-            detection_data = {
-                "class_id": class_id,
-                "class": class_name,
-                "confidence": float(confidence),
-                "bbox": {
-                    "x1": float(x1_exp),
-                    "y1": float(y1_exp),
-                    "x2": float(x2_exp),
-                    "y2": float(y2_exp)
+            for _, detection in df.iterrows():
+                x1, y1, x2, y2 = detection['xmin'], detection['ymin'], detection['xmax'], detection['ymax']
+                confidence = detection['confidence']
+                class_id = int(detection['class'])
+                class_name = detection['name']
+                
+                # Use our custom class names if available
+                if class_id in CLASS_NAMES:
+                    class_name = CLASS_NAMES[class_id]
+                
+                # Optionally expand bounding box
+                x1_exp, y1_exp, x2_exp, y2_exp = expand_bounding_box(
+                    (x1, y1, x2, y2), original_width, original_height
+                )
+                
+                detection_data = {
+                    "class_id": class_id,
+                    "class": class_name,
+                    "confidence": float(confidence),
+                    "bbox": {
+                        "x1": float(x1_exp),
+                        "y1": float(y1_exp),
+                        "x2": float(x2_exp),
+                        "y2": float(y2_exp)
+                    }
                 }
-            }
-            
-            detections.append(detection_data)
-            logger.info(f"  Detection: {class_name} ({confidence:.3f}) at ({x1_exp:.1f}, {y1_exp:.1f}, {x2_exp:.1f}, {y2_exp:.1f})")
+                
+                detections.append(detection_data)
+                logger.info(f"  Detection: {class_name} ({confidence:.3f}) at ({x1_exp:.1f}, {y1_exp:.1f}, {x2_exp:.1f}, {y2_exp:.1f})")
         
         # Sort by confidence and limit detections
         max_detections_per_image = 20
@@ -202,7 +229,7 @@ def process_single_image(image_data, frontend_image_id, filename=None):
         return result
         
     except Exception as e:
-        logger.error(f"Error processing image {filename or frontend_image_id}: {str(e)}")
+        logger.error(f"Error processing image {filename or frontend_image_id}: {str(e)}", exc_info=True) # Log full traceback
         return {
             "image_id": frontend_image_id,
             "error": f"Processing failed: {str(e)}",
@@ -219,7 +246,8 @@ def predict():
         return '', 200
     
     if model is None:
-        return jsonify({"error": "Model not loaded. Please ensure your model file (best.pt or last.pt) is available or check server logs."}), 500
+        logger.error("Predict endpoint called but model is not loaded.")
+        return jsonify({"error": "Model not loaded. Please ensure your model file (best.pt or last.pt) is available or check server logs for critical errors during startup."}), 500
 
     results = []
     total_defects = 0
@@ -323,7 +351,7 @@ def predict():
         return jsonify(response_data), 200
         
     except Exception as e:
-        logger.error(f"Unexpected error in predict endpoint: {str(e)}")
+        logger.critical(f"CRITICAL ERROR: Unexpected error in predict endpoint: {str(e)}", exc_info=True) # Log full traceback
         return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 if __name__ == '__main__':
