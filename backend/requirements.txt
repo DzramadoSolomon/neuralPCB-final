@@ -1,17 +1,9 @@
-Flask==3.0.3  # Latest stable version from your requirements
-flask-cors==5.0.0  # Keep as is, latest version
-torchvision==0.21.0  # Compatible with torch 2.7.1
-torch==2.6.0  # Added to ensure compatibility with torchvision
-Pillow==10.4.0  # Latest stable version
-numpy==2.0.2  # Latest stable version, compatible with Python 3.7+
-opencv-python-headless==4.10.0.84  # Latest stable version
-PyYAML==6.0.2  # Latest stable version
-yolov5==7.0.13  # Keep as is, no newer version specified
-pandas==2.2.3  # Latest stable version
-requests==2.32.3  # Latest stable version
-gunicorn==23.0.0  # Latest stable version from your requirements
-ultralytics==8.3.0  # Latest stable version
-scipy==1.14.1  # Latest stable version
-matplotlib==3.9.2  # Latest stable version
-seaborn==0.13.2  # Latest stable version
-huggingface_hub==0.26.0  # Upgraded to latest stable version
+flask==3.0.3
+flask-cors==5.0.0
+Pillow==10.4.0
+numpy==1.26.4
+yolov5==7.0.13
+gunicorn==23.0.0
+huggingface-hub==0.26.0
+torch==2.5.0
+torchvision==0.20.0
