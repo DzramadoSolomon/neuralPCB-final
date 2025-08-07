@@ -44,7 +44,7 @@ const PCBDefectDetector = () => {
 
   const checkBackendStatus = async () => {
     try {
-      const response = await fetch('https://neuralpcb-final.onrender.com/health', {
+      const response = await fetch('https://projectneural.onrender.com/health', {
         method: 'GET',
         mode: 'cors',
       });
@@ -170,7 +170,7 @@ const PCBDefectDetector = () => {
       let response;
       let requestBody;
 
-      const backendUrl = 'https://neuralpcb-final.onrender.com/predict';
+      const backendUrl = 'https://projectneural.onrender.com/predict';
 
       const hasCameraImages = images.some(img => img.type === 'camera');
 
