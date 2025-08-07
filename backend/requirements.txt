@@ -1,7 +1,7 @@
 Flask==3.0.3  # Latest stable version from your requirements
 flask-cors==5.0.0  # Keep as is, latest version
 torchvision==0.21.0  # Compatible with torch 2.7.1
-torch==2.7.1  # Added to ensure compatibility with torchvision
+torch==2.6.0  # Added to ensure compatibility with torchvision
 Pillow==10.4.0  # Latest stable version
 numpy==2.0.2  # Latest stable version, compatible with Python 3.7+
 opencv-python-headless==4.10.0.84  # Latest stable version
