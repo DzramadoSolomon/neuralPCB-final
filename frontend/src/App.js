@@ -1,10 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Camera, AlertCircle, CheckCircle, Loader2, X, Zap, Eye, Target, BarChart3, Download, Plus, Image as ImageIcon, ZoomIn, FileText } from 'lucide-react';
-
-// IMPORTANT: Update this API_URL to match your backend server's address
-const API_URL = 'http://13.51.242.26:8000';
-const HEALTH_URL = `${API_URL}/health`;
-const PREDICT_URL = `${API_URL}/predict`;
+import { Camera, AlertCircle, CheckCircle, Loader2, X, Zap, Eye, Target, BarChart3, Download, Plus, Image as ImageIcon, ZoomIn, FileText, WifiOff } from 'lucide-react';
 
 const defectDescriptions = {
   missing_hole: 'A hole that should be present in the PCB is missing',
@@ -12,7 +7,7 @@ const defectDescriptions = {
   open_circuit: 'Break in the conductive path preventing current flow',
   short: 'Unintended connection between conductors',
   spur: 'Unwanted protrusion of copper material',
-  spurious_copper: 'Excess copper material where it shouldn\\'t be'
+  spurious_copper: 'Excess copper material where it shouldn\'t be'
 };
 
 const PCBDefectDetector = () => {
@@ -45,29 +40,9 @@ const PCBDefectDetector = () => {
   // Check backend status on component mount
   useEffect(() => {
     checkBackendStatus();
-    // Set up an interval to check the backend status every 10 seconds
-    const interval = setInterval(checkBackendStatus, 10000);
-    // Cleanup the interval when the component unmounts
-    return () => clearInterval(interval);
   }, []);
 
-  const checkBackendStatus = async () => {
-    try {
-      const response = await fetch(HEALTH_URL, {
-        method: 'GET',
-        mode: 'cors',
-      });
-      
-      if (response.ok) {
-        setBackendStatus('online');
-      } else {
-        setBackendStatus('offline');
-      }
-    } catch (err) {
-      console.error('Backend health check failed:', err);
-      setBackendStatus('offline');
-    }
-  };
+
 
   // Camera functions
   const startCamera = async () => {
@@ -161,11 +136,6 @@ const PCBDefectDetector = () => {
   const detectDefects = async () => {
     if (images.length === 0) return;
 
-    // Check backend status first
-    if (backendStatus === 'offline') {
-      setError('Backend server appears to be offline. Please wait a moment and try again, or contact support.');
-      return;
-    }
 
     setLoading(true);
     setError(null);
@@ -176,6 +146,8 @@ const PCBDefectDetector = () => {
     try {
       let response;
       let requestBody;
+
+      const backendUrl = "http://13.51.242.26:8000";
 
       const hasCameraImages = images.some(img => img.type === 'camera');
 
@@ -189,7 +161,7 @@ const PCBDefectDetector = () => {
         };
         console.log('Sending JSON request to backend with', images.length, 'images');
         
-        response = await fetch(PREDICT_URL, {
+        response = await fetch(backendUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -211,7 +183,7 @@ const PCBDefectDetector = () => {
         formData.append('image_metadata', JSON.stringify(imageMetadata));
         console.log('Sending FormData request to backend with', images.length, 'images');
 
-        response = await fetch(PREDICT_URL, {
+        response = await fetch(backendUrl, {
           method: 'POST',
           mode: 'cors',
           body: formData,
@@ -311,6 +283,7 @@ const PCBDefectDetector = () => {
 
         const newBoxes = predictions.map((detection, index) => {
           const box = detection.bbox || detection.location || {};
+          
           const x1 = parseFloat(box.x1) || 0;
           const y1 = parseFloat(box.y1) || 0;
           const x2 = parseFloat(box.x2) || 0;
@@ -325,8 +298,10 @@ const PCBDefectDetector = () => {
             class: detection.class || detection.type || 'unknown',
             confidence: detection.confidence || 0
           };
+
           return scaledBox;
         });
+
         setBoxes(newBoxes);
       };
 
@@ -344,6 +319,7 @@ const PCBDefectDetector = () => {
 
       const resizeObserver = new ResizeObserver(debouncedUpdate);
       resizeObserver.observe(imageElement);
+      
       window.addEventListener('resize', debouncedUpdate);
 
       return () => {
@@ -352,7 +328,6 @@ const PCBDefectDetector = () => {
         window.removeEventListener('resize', debouncedUpdate);
         imageElement.removeEventListener('load', updateBoxes);
       };
-
     }, [imageId, predictions, imageDimensions, isModal, showBoundingBoxes]);
 
     if (!showBoundingBoxes || boxes.length === 0) {
@@ -372,20 +347,32 @@ const PCBDefectDetector = () => {
               height: `${box.height}px`,
               border: `3px solid ${defectColors[box.class] || '#FF0000'}`,
               backgroundColor: `${defectColors[box.class] || '#FF0000'}20`,
-              borderRadius: '4px',
+              borderRadius: '3px',
+              pointerEvents: 'none',
               zIndex: 10,
-              pointerEvents: 'none'
+              boxSizing: 'border-box',
+              animation: 'pulse 2s infinite'
             }}
           >
             <div
-              className="absolute text-xs text-white p-1 rounded-sm -top-6 left-0"
               style={{
-                backgroundColor: `${defectColors[box.class] || '#FF0000'}`,
+                position: 'absolute',
+                top: '-25px',
+                left: '0',
+                backgroundColor: defectColors[box.class] || '#FF0000',
+                color: '#fff',
+                padding: '3px 8px',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                borderRadius: '3px',
                 whiteSpace: 'nowrap',
-                fontWeight: 'bold'
+                boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                maxWidth: '200px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
               }}
             >
-              {`${box.class} (${(box.confidence * 100).toFixed(1)}%)`}
+              {box.class.replace('_', ' ')} {(box.confidence * 100).toFixed(0)}%
             </div>
           </div>
         ))}
@@ -393,458 +380,770 @@ const PCBDefectDetector = () => {
     );
   };
 
-  // Helper function to get image dimensions
-  const getImageDimensions = (imageId) => {
-    const imageResult = results.find(r => r.image_id === imageId);
-    if (imageResult && imageResult.image_dimensions) {
-      return imageResult.image_dimensions;
-    }
-    const uploadedImage = images.find(img => img.id === imageId);
-    if (uploadedImage) {
-      const img = new window.Image();
-      img.src = uploadedImage.src;
-      return { width: img.naturalWidth, height: img.naturalHeight };
-    }
-    return null;
-  };
-  
-  const handleDownloadResults = () => {
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + "Image Name,Defect Type,Confidence,Bounding Box (x1,y1,x2,y2)\n"
-      + results.flatMap(result =>
-          (result.predictions || []).map(p =>
-            `${result.image_name},${p.class},${p.confidence.toFixed(4)},"${p.bbox.x1},${p.bbox.y1},${p.bbox.x2},${p.bbox.y2}"`
-          )
-        ).join('\n');
-    
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'pcb_defect_results.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  // Image Modal Component
+  const ImageModal = () => {
+    if (!selectedImage) return null;
 
-  const handleDownloadSummary = () => {
-    const summaryText = `
-PCB Defect Detection Summary Report
-===================================
-Total Images Processed: ${summary.total_images_processed}
-Total Defects Found: ${summary.total_defects_found}
-Processing Time: ${processingTime} seconds
+    const imageResult = results.find(r => r.image_id === selectedImage.id);
 
-Defect Breakdown:
-${Object.entries(summary.defect_breakdown || {}).map(([defect, count]) => `- ${defect}: ${count}`).join('\n')}
-
-Processing Errors:
-${(summary.processing_errors || []).length > 0 ? summary.processing_errors.map(err => `- ${err}`).join('\n') : 'None'}
-
-Detailed Results:
-${results.map(r => `
----
-Image: ${r.image_name}
-Image ID: ${r.image_id}
-Defects Found: ${r.total_detections}
-Predictions:
-${(r.predictions || []).map(p => 
-  `  - Class: ${p.class}, Confidence: ${(p.confidence * 100).toFixed(1)}%, Bbox: [${p.bbox.x1}, ${p.bbox.y1}, ${p.bbox.x2}, ${p.bbox.y2}]`
-).join('\n')}
-`).join('\n')}
-    `;
-    
-    const blob = new Blob([summaryText], { type: 'text/plain;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'pcb_defect_summary.txt';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const Modal = ({ image, onClose }) => {
-    const defectResult = results.find(r => r.image_id === image.id);
-    const predictions = defectResult ? defectResult.predictions : [];
-    const imageDimensions = getImageDimensions(image.id);
-    
     return (
-      <div 
-        onClick={onClose} 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900 bg-opacity-75 backdrop-blur-sm"
-      >
-        <div 
-          onClick={e => e.stopPropagation()} 
-          className="relative max-w-full max-h-[90vh] bg-white rounded-lg shadow-xl overflow-hidden flex flex-col"
-        >
-          <div className="flex justify-between items-center p-4 bg-gray-100 border-b">
-            <h3 className="text-xl font-bold text-gray-800">{image.name}</h3>
-            <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200 transition-colors">
-              <X className="w-6 h-6 text-gray-600" />
-            </button>
-          </div>
-          <div className="relative p-4 flex-1 flex items-center justify-center overflow-auto">
-            <img 
-              ref={modalImageRef}
-              src={image.src} 
-              alt={image.name} 
-              className="max-w-full max-h-full rounded-lg object-contain"
-            />
-            {imageDimensions && (
-              <BoundingBoxOverlay 
-                imageId={image.id}
-                predictions={predictions} 
-                imageDimensions={imageDimensions}
-                isModal={true}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const getDefectCount = (imageId) => {
-    const result = results.find(r => r.image_id === imageId);
-    return result ? result.total_detections : 0;
-  };
-  
-  const getBackgroundColor = (imageId) => {
-    const result = results.find(r => r.image_id === imageId);
-    if (!result) return 'bg-gray-100';
-    if (result.total_detections === 0) return 'bg-emerald-50';
-    if (result.total_detections > 0) return 'bg-red-50';
-    return 'bg-gray-100';
-  }
-
-  const getIcon = (imageId) => {
-    const result = results.find(r => r.image_id === imageId);
-    if (!result) return null;
-    if (result.total_detections === 0) return <CheckCircle className="text-emerald-500"/>;
-    if (result.total_detections > 0) return <AlertCircle className="text-red-500"/>;
-    return null;
-  }
-  
-  return (
-    <div className="font-sans antialiased text-gray-800 bg-gray-50 min-h-screen">
-      {/* Main Content Grid */}
-      <div className="min-h-screen grid lg:grid-cols-[1fr_350px] gap-0">
-        
-        {/* Main Content Area */}
-        <div className="flex flex-col p-6 lg:p-10 bg-white shadow-xl rounded-b-xl lg:rounded-r-none">
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.9)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: '20px'
+      }} onClick={() => setSelectedImage(null)}>
+        <div style={{
+          position: 'relative',
+          maxWidth: '90vw',
+          maxHeight: '90vh',
+          backgroundColor: 'white',
+          borderRadius: '15px',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
+        }} onClick={(e) => e.stopPropagation()}>
           
-          {/* Header */}
-          <header className="app-header mb-8 pb-4 border-b-2 border-gray-100">
-            <div className="flex justify-between items-start">
-              <div className="flex-1">
-                <h1 className="text-3xl lg:text-4xl font-extrabold text-gray-900 leading-tight mb-2">PCB Defect Detector</h1>
-                <p className="text-md text-gray-500">
-                  Analyze images of Printed Circuit Boards to detect common defects.
-                </p>
-              </div>
-              <div className="ml-4">
-                <div 
-                  className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold transition-colors duration-300 ${
-                    backendStatus === 'online' ? 'bg-emerald-100 text-emerald-800' : 
-                    backendStatus === 'offline' ? 'bg-rose-100 text-rose-800' : 'bg-yellow-100 text-yellow-800'
-                  }`}
-                >
-                  {backendStatus === 'online' && <CheckCircle className="w-4 h-4" />}
-                  {backendStatus === 'offline' && <X className="w-4 h-4" />}
-                  {backendStatus === 'unknown' && <Loader2 className="w-4 h-4 animate-spin" />}
-                  <span>Server: {backendStatus.charAt(0).toUpperCase() + backendStatus.slice(1)}</span>
-                </div>
-              </div>
+          <div style={{
+            padding: '15px 20px',
+            backgroundColor: '#f8f9fa',
+            borderBottom: '1px solid #e9ecef',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexShrink: 0
+          }}>
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '600' }}>
+              {selectedImage.name}
+            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+              {imageResult && (
+                <span style={{
+                  background: '#d1ecf1',
+                  color: '#0c5460',
+                  padding: '6px 12px',
+                  borderRadius: '15px',
+                  fontSize: '0.9rem',
+                  fontWeight: '600'
+                }}>
+                  {imageResult.total_detections} defects found
+                </span>
+              )}
+              <button
+                onClick={() => setSelectedImage(null)}
+                style={{
+                  background: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  transition: 'background-color 0.2s ease'
+                }}
+              >
+                <X size={18} />
+              </button>
             </div>
-          </header>
-
-          {/* Controls */}
-          <div className="flex-grow flex flex-col">
-            <div className="controls-section mb-6 p-5 bg-gray-100 rounded-xl shadow-inner">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-gray-700">
-                <Plus className="w-5 h-5"/> Add Images
-              </h2>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  onChange={handleMultipleImageUpload}
-                  ref={fileInputRef}
-                  style={{ display: 'none' }}
-                  id="file-input"
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={loading}
-                  className="flex-1 flex justify-center items-center gap-2 px-6 py-3 rounded-lg shadow-md transition-all duration-300 bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:bg-blue-300"
-                >
-                  <ImageIcon className="w-5 h-5"/> Select Images
-                </button>
-                <button
-                  onClick={startCamera}
-                  disabled={loading}
-                  className="flex-1 flex justify-center items-center gap-2 px-6 py-3 rounded-lg shadow-md transition-all duration-300 bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:bg-emerald-300"
-                >
-                  <Camera className="w-5 h-5"/> Use Camera
-                </button>
-              </div>
-            </div>
-            
-            {/* Camera View */}
-            {showCamera && (
-              <div className="relative mb-6 p-5 bg-gray-100 rounded-xl shadow-inner flex flex-col items-center">
-                <h3 className="text-lg font-bold mb-2">Live Camera Feed</h3>
-                <video ref={videoRef} autoPlay playsInline className="w-full max-h-[60vh] rounded-lg shadow-md border-2 border-gray-300"></video>
-                <div className="mt-4 flex gap-4">
-                  <button onClick={capturePhoto} className="flex items-center gap-2 px-6 py-3 rounded-lg shadow-md transition-all duration-300 bg-indigo-600 text-white font-semibold hover:bg-indigo-700">
-                    <Camera className="w-5 h-5"/> Capture Photo
-                  </button>
-                  <button onClick={stopCamera} className="flex items-center gap-2 px-6 py-3 rounded-lg shadow-md transition-all duration-300 bg-gray-400 text-white font-semibold hover:bg-gray-500">
-                    <X className="w-5 h-5"/> Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-            
-            {/* Image Grid */}
-            {images.length > 0 && (
-              <div className="flex-1 overflow-hidden flex flex-col">
-                <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-gray-700">
-                  <Eye className="w-5 h-5"/> Images for Analysis
-                </h2>
-                <div className="images-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 pb-5 overflow-y-auto custom-scrollbar-thin flex-1">
-                  {images.map((image) => (
-                    <div 
-                      key={image.id}
-                      className={`image-card relative w-full h-48 rounded-xl shadow-lg overflow-hidden transition-all duration-300 transform hover:scale-[1.02] cursor-pointer ${getBackgroundColor(image.id)}`}
-                      onClick={() => setSelectedImage(image)}
-                    >
-                      <img 
-                        ref={el => imageRefs.current[image.id] = el}
-                        src={image.src} 
-                        alt={image.name} 
-                        className="w-full h-full object-contain p-4"
-                        onLoad={() => {
-                          const imgDim = getImageDimensions(image.id);
-                          if (imgDim) {
-                            const event = new Event('resize');
-                            window.dispatchEvent(event);
-                          }
-                        }}
-                      />
-                      
-                      <div className="absolute top-0 right-0 p-2 z-20">
-                        <button onClick={(e) => { e.stopPropagation(); removeImage(image.id); }} className="text-white bg-red-500 rounded-full p-1.5 shadow-md hover:bg-red-600 transition-colors">
-                          <X className="w-4 h-4"/>
-                        </button>
-                      </div>
-
-                      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-gray-900 to-transparent flex justify-between items-center text-white z-20">
-                        <span className="text-sm font-semibold truncate">{image.name}</span>
-                        <div className="flex items-center gap-2">
-                          {getIcon(image.id)}
-                          <span className="text-lg font-bold">
-                            {getDefectCount(image.id)}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      {getDefectCount(image.id) > 0 && showBoundingBoxes && (
-                        <BoundingBoxOverlay 
-                          imageId={image.id}
-                          predictions={results.find(r => r.image_id === image.id)?.predictions || []}
-                          imageDimensions={getImageDimensions(image.id)}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Action Buttons */}
-            {images.length > 0 && (
-              <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                <button
-                  onClick={detectDefects}
-                  disabled={loading || backendStatus === 'offline'}
-                  className="flex-1 flex justify-center items-center gap-2 px-6 py-3 rounded-lg shadow-md transition-all duration-300 bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:bg-gray-300 disabled:text-gray-500"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin"/> Processing...
-                    </>
-                  ) : (
-                    <>
-                      <Target className="w-5 h-5"/> Start Detection
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={clearAll}
-                  className="flex-1 flex justify-center items-center gap-2 px-6 py-3 rounded-lg shadow-md transition-all duration-300 bg-gray-400 text-white font-semibold hover:bg-gray-500"
-                >
-                  <X className="w-5 h-5"/> Clear All
-                </button>
-              </div>
-            )}
-            
-            {/* Error Message */}
-            {error && (
-              <div className="mt-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg shadow-sm" role="alert">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5"/>
-                  <span className="font-medium">{error}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Canvas for capturing photos */}
-            <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
-            
           </div>
-        </div>
 
-        {/* Sidebar */}
-        <div className="sidebar flex flex-col p-6 lg:p-10 bg-gray-100 rounded-t-xl lg:rounded-l-none">
-          <div className="flex-1 flex flex-col gap-6">
-            
-            {/* Summary Card */}
-            <div className="summary-card p-5 bg-white rounded-xl shadow-md">
-              <div className="section-header flex items-center justify-between pb-4 border-b border-gray-200 mb-4">
-                <h2 className="text-xl font-bold text-gray-700 flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5"/> Summary
-                </h2>
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-2 cursor-pointer transition-all duration-300 px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 shadow-sm hover:bg-gray-200">
-                    <input
-                      type="checkbox"
-                      checked={showBoundingBoxes}
-                      onChange={() => setShowBoundingBoxes(!showBoundingBoxes)}
-                      className="form-checkbox text-blue-600 rounded-md"
-                    />
-                    <span>Show Boxes</span>
-                  </label>
-                  <button onClick={handleDownloadSummary} disabled={!summary.total_images_processed} className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold text-white bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-300 disabled:text-gray-500 transition-colors">
-                    <FileText className="w-3.5 h-3.5"/> Summary
-                  </button>
-                  <button onClick={handleDownloadResults} disabled={!summary.total_images_processed} className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold text-white bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-300 disabled:text-gray-500 transition-colors">
-                    <Download className="w-3.5 h-3.5"/> CSV
-                  </button>
-                </div>
-              </div>
-              <div className="text-sm grid grid-cols-2 gap-y-4">
-                <div className="font-semibold text-gray-500">Images Processed:</div>
-                <div className="text-right font-bold text-gray-800">
-                  {summary.total_images_processed || 0}
-                </div>
-                
-                <div className="font-semibold text-gray-500">Total Defects:</div>
-                <div className={`text-right font-bold ${summary.total_defects_found > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                  {summary.total_defects_found || 0}
-                </div>
-                
-                {processingTime > 0 && (
-                  <>
-                    <div className="font-semibold text-gray-500">Processing Time:</div>
-                    <div className="text-right font-bold text-gray-800">
-                      {processingTime} s
-                    </div>
-                  </>
-                )}
-              </div>
+          <div style={{
+            position: 'relative',
+            maxHeight: 'calc(90vh - 140px)',
+            overflow: 'auto',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: '20px',
+            flexGrow: 1
+          }}>
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <img
+                ref={modalImageRef}
+                src={selectedImage.src}
+                alt={selectedImage.name}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '70vh',
+                  objectFit: 'contain',
+                  borderRadius: '8px'
+                }}
+                onLoad={() => {
+                  setTimeout(() => {
+                    if (modalImageRef.current) {
+                      const event = new Event('load');
+                      modalImageRef.current.dispatchEvent(event);
+                    }
+                  }, 200);
+                }}
+              />
+              
+              {imageResult && imageResult.predictions && (
+                <BoundingBoxOverlay
+                  imageId={selectedImage.id}
+                  predictions={imageResult.predictions}
+                  imageDimensions={imageResult.image_dimensions}
+                  isModal={true}
+                />
+              )}
             </div>
-            
-            {/* Defect Breakdown Card */}
-            {summary.total_defects_found > 0 && (
-              <div className="results-card p-5 bg-white rounded-xl shadow-md">
-                <h3 className="text-lg font-bold pb-4 border-b border-gray-200 text-gray-700">Defect Breakdown</h3>
-                <ul className="mt-4 space-y-3">
-                  {Object.entries(summary.defect_breakdown || {})
-                    .sort(([, countA], [, countB]) => countB - countA)
-                    .map(([defect, count]) => (
-                    <li key={defect} className="flex justify-between items-center text-sm">
-                      <span className="font-medium text-gray-600 capitalize">
-                        {defect.replace('_', ' ')}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded-full font-bold ${defect === 'short' || defect === 'open_circuit' ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-600'}`}>
-                        {count}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            
-            {/* Legend Card */}
-            <div className="legend-card p-5 bg-white rounded-xl shadow-md flex-1">
-              <h3 className="text-lg font-bold pb-4 border-b border-gray-200 text-gray-700">Defect Legend</h3>
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {Object.entries(defectDescriptions).map(([defect, description]) => (
-                  <div key={defect} className="flex items-start gap-3">
-                    <div
-                      className="w-4 h-4 rounded-full flex-shrink-0 mt-1"
-                      style={{ backgroundColor: defectColors[defect] }}
-                    ></div>
-                    <div className="flex-1">
-                      <p className="font-bold text-sm leading-none capitalize">
-                        {defect.replace('_', ' ')}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">{description}</p>
+          </div>
+
+          {imageResult && imageResult.predictions && imageResult.predictions.length > 0 && (
+            <div style={{
+              padding: '20px',
+              backgroundColor: '#f8f9fa',
+              borderTop: '1px solid #e9ecef',
+              maxHeight: '200px',
+              overflowY: 'auto',
+              flexShrink: 0
+            }}>
+              <h4 style={{ margin: '0 0 15px 0', fontSize: '1rem', fontWeight: '600' }}>
+                Detected Defects ({imageResult.predictions.length})
+              </h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '10px' }}>
+                {imageResult.predictions.map((detection, index) => (
+                  <div key={index} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: '12px',
+                    backgroundColor: 'white',
+                    borderRadius: '8px',
+                    border: `2px solid ${defectColors[detection.class] || '#FF0000'}`,
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                  }}>
+                    <div style={{
+                      width: '16px',
+                      height: '16px',
+                      borderRadius: '50%',
+                      backgroundColor: defectColors[detection.class] || '#FF0000',
+                      flexShrink: 0
+                    }} />
+                    <div style={{ flex: 1 }}>
+                      <div
+                        style={{
+                          fontWeight: '600',
+                          fontSize: '0.9rem',
+                          textTransform: 'capitalize',
+                          marginBottom: '2px'
+                        }}
+                        title={defectDescriptions[detection.class] || 'Defect info not available'}
+                      >
+                        {detection.class?.replace('_', ' ')}
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#666' }}>
+                        Confidence: {(detection.confidence * 100).toFixed(1)}%
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-            
-            {/* About Section */}
-            <footer className="mt-auto pt-6 text-sm text-gray-400 text-center border-t border-gray-200">
-              <p>Powered by YOLOv5 and React.js</p>
-            </footer>
-
-          </div>
+          )}
         </div>
       </div>
+    );
+  };
+
+  const getOverallStats = () => {
+    return summary.defect_breakdown || {};
+  };
+
+  const downloadReport = () => {
+    const report = {
+      timestamp: new Date().toISOString(),
+      processingTime: processingTime,
+      totalImages: images.length,
+      totalDefects: summary.total_defects_found || 0,
+      overallStats: getOverallStats(),
+      imageResults: results.map(result => ({
+        imageId: result.image_id,
+        defectCount: result.total_detections,
+        detections: result.predictions?.map(d => ({
+          type: d.class,
+          confidence: d.confidence,
+          location: d.bbox || d.location
+        })) || []
+      }))
+    };
+    
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pcb_batch_report_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadDocumentReport = () => {
+    let documentContent = `PCB DEFECT DETECTION REPORT\n`;
+    documentContent += `Generated on: ${new Date().toLocaleString()}\n`;
+    documentContent += `Processing Time: ${processingTime}s\n`;
+    documentContent += `Total Images Processed: ${images.length}\n`;
+    documentContent += `Total Defects Found: ${summary.total_defects_found || 0}\n\n`;
+    
+    documentContent += `OVERALL DEFECT STATISTICS:\n`;
+    documentContent += `${'-'.repeat(50)}\n`;
+    const overallStats = getOverallStats();
+    Object.entries(overallStats).forEach(([defect, count]) => {
+      documentContent += `${defect.replace('_', ' ').toUpperCase()}: ${count}\n`;
+    });
+    documentContent += `\n`;
+
+    documentContent += `DETAILED IMAGE ANALYSIS:\n`;
+    documentContent += `${'='.repeat(50)}\n\n`;
+
+    results.forEach((result, index) => {
+      const image = images.find(img => img.id === result.image_id);
+      const imageName = image ? image.name : `Image ${index + 1}`;
       
-      {/* Modal for Full-screen Image View */}
-      {selectedImage && (
-        <Modal 
-          image={selectedImage} 
-          onClose={() => setSelectedImage(null)} 
-        />
-      )}
-
-      {/* Tailwind and custom styles */}
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+      documentContent += `Image ${index + 1}: ${imageName}\n`;
+      documentContent += `${'-'.repeat(30)}\n`;
+      documentContent += `Total Defects: ${result.total_detections}\n`;
+      
+      if (result.error) {
+        documentContent += `Error: ${result.error}\n`;
+      } else if (result.predictions && result.predictions.length > 0) {
+        documentContent += `\nDetected Defects:\n`;
         
-        body {
-          font-family: 'Inter', sans-serif;
-        }
+        result.predictions.forEach((detection, detIndex) => {
+          const bbox = detection.bbox || detection.location || {};
+          documentContent += `  ${detIndex + 1}. ${detection.class?.replace('_', ' ').toUpperCase()}\n`;
+          documentContent += `     - Confidence Score: ${(detection.confidence * 100).toFixed(1)}%\n`;
+          documentContent += `     - Position: (${Math.round(bbox.x1 || 0)}, ${Math.round(bbox.y1 || 0)}) to (${Math.round(bbox.x2 || 0)}, ${Math.round(bbox.y2 || 0)})\n`;
+          documentContent += `     - Description: ${defectDescriptions[detection.class] || 'No description available'}\n`;
+          documentContent += `\n`;
+        });
+      } else {
+        documentContent += `No defects detected in this image.\n`;
+      }
+      
+      documentContent += `\n`;
+    });
 
-        .custom-scrollbar-thin::-webkit-scrollbar {
-          width: 8px;
-        }
-        .custom-scrollbar-thin::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 10px;
-        }
-        .custom-scrollbar-thin::-webkit-scrollbar-thumb {
-          background: #888;
-          border-radius: 10px;
-        }
-        .custom-scrollbar-thin::-webkit-scrollbar-thumb:hover {
-          background: #555;
-        }
+    documentContent += `DEFECT TYPE DESCRIPTIONS:\n`;
+    documentContent += `${'='.repeat(50)}\n`;
+    Object.entries(defectDescriptions).forEach(([type, description]) => {
+      documentContent += `${type.replace('_', ' ').toUpperCase()}:\n`;
+      documentContent += `  ${description}\n\n`;
+    });
 
-        /* Loading animation for processing button */
-        .animate-pulse-light {
-          animation: pulse-light 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
+    const blob = new Blob([documentContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pcb_defect_report_${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
-        @keyframes pulse-light {
-          0%, 100% { opacity: 0.5; }
-          50% { opacity: 1; }
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+      color: '#333'
+    }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '20px' }}>
+        {/* Header Section */}
+        <div style={{ textAlign: 'center', marginBottom: '30px', color: 'white' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '15px' }}>
+            <div style={{ background: 'rgba(255,255,255,0.2)', borderRadius: '15px', padding: '15px', backdropFilter: 'blur(10px)' }}>
+              <Zap size={32} />
+            </div>
+            <h1 style={{ 
+              fontSize: '2.5rem', 
+              fontWeight: '800', 
+              margin: '0',
+              background: 'linear-gradient(45deg, #fff, #f0f0f0)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent'
+            }}>
+              NEURAL PCB
+            </h1>
+          </div>
+          <p style={{ fontSize: '1.1rem', opacity: '0.9', maxWidth: '600px', margin: '0 auto', lineHeight: '1.6' }}>
+            Advanced AI-powered PCB quality control system. Upload multiple PCB images or use camera to detect manufacturing defects.
+          </p>
+          
+          {/* Backend Status Indicator */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            gap: '8px', 
+            marginTop: '15px',
+            padding: '8px 15px',
+            background: backendStatus === 'online' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+            borderRadius: '20px',
+            fontSize: '0.9rem',
+            fontWeight: '600'
+          }}>
+            {backendStatus === 'online' ? (
+              <>
+                <CheckCircle size={16} />
+                Analysis Server Online
+              </>
+            ) : backendStatus === 'offline' ? (
+              <>
+                <WifiOff size={16} />
+                Analysis Server Offline
+              </>
+            ) : (
+              <>
+                <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                Checking Server Status...
+              </>
+            )}
+            <button 
+              onClick={checkBackendStatus}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '2px 6px',
+                color: 'white',
+                cursor: 'pointer',
+                fontSize: '0.8rem'
+              }}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Main Content Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '30px', alignItems: 'start' }} className="main-grid">
+          {/* Left Column - Image Management & Display */}
+          <div>
+            {/* Controls Section */}
+            <div style={{ 
+              background: 'rgba(255, 255, 255, 0.95)', 
+              borderRadius: '20px', 
+              padding: '25px', 
+              backdropFilter: 'blur(20px)',
+              marginBottom: '20px',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+            }} className="controls-section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }} className="section-header">
+                <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '0', fontSize: '1.3rem', fontWeight: '700' }}>
+                  <ImageIcon size={24} />
+                  Image Management
+                </h2>
+                {processingTime > 0 && (
+                  <div style={{ background: '#e6fffa', color: '#008080', padding: '8px 15px', borderRadius: '20px', fontSize: '0.9rem', fontWeight: '600' }} className="processing-time">
+                    Processing: {processingTime}s
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '15px' }} className="button-group">
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px',
+                  background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                  color: 'white', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
+                  border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                }} className="action-button">
+                  <Plus size={18} />
+                  Add Images
+                  <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleMultipleImageUpload} style={{ display: 'none' }} />
+                </label>
+                
+                <button onClick={showCamera ? stopCamera : startCamera} style={{
+                  display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px',
+                  background: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
+                  color: '#2d3748', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
+                  border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                }} className="action-button">
+                  <Camera size={18} />
+                  {showCamera ? 'Stop Camera' : 'Use Camera'}
+                </button>
+                
+                {images.length > 0 && (
+                  <>
+                    <button onClick={clearAll} style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px',
+                      background: 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
+                      color: '#2d3748', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
+                      border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                    }} className="action-button">
+                      <X size={18} />
+                      Clear All
+                    </button>
+                    
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: '#4a5568' }} className="checkbox-label">
+                      <input type="checkbox" checked={showBoundingBoxes} onChange={(e) => setShowBoundingBoxes(e.target.checked)} />
+                      <Eye size={16} />
+                      Show Bounding Boxes
+                    </label>
+                  </>
+                )}
+
+                {results.length > 0 && (
+                  <>
+                    <button onClick={downloadReport} style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px',
+                      background: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
+                      color: '#2d3748', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
+                      border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                    }} className="action-button">
+                      <Download size={18} />
+                      JSON Report
+                    </button>
+
+                    <button onClick={downloadDocumentReport} style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px',
+                      background: 'linear-gradient(135deg, #d299c2 0%, #fef9d7 100%)',
+                      color: '#2d3748', borderRadius: '10px', cursor: 'pointer', fontWeight: '600',
+                      border: 'none', transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                    }} className="action-button">
+                      <FileText size={18} />
+                      Text Report
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {error && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fed7d7', color: '#c53030', padding: '12px', borderRadius: '8px', marginBottom: '15px' }} className="error-message">
+                  <AlertCircle size={20} />
+                  <div>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>Connection Error</div>
+                    <div style={{ fontSize: '0.9rem' }}>{error}</div>
+                    {backendStatus === 'offline' && (
+                      <div style={{ fontSize: '0.8rem', marginTop: '4px', opacity: '0.8' }}>
+                        Tip: Try refreshing the server status or wait a few minutes for the server to start up.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Camera Live View Section */}
+              {showCamera && (
+                <div style={{ marginBottom: '20px' }} className="camera-section">
+                  <div style={{ background: '#000', borderRadius: '12px', overflow: 'hidden', marginBottom: '12px' }}>
+                    <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '300px', objectFit: 'cover' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }} className="camera-controls">
+                    <button onClick={capturePhoto} style={{
+                      background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                      color: 'white', border: 'none', padding: '12px 20px', borderRadius: '10px',
+                      fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+                      transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                    }} className="action-button">
+                      <Camera size={18} />
+                      Capture Photo
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+              {/* Detect Button */}
+              {images.length > 0 && (
+                <div style={{ textAlign: 'center' }} className="detect-button-container">
+                  <button 
+                    onClick={detectDefects} 
+                    disabled={loading || backendStatus === 'offline'} 
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '10px', padding: '15px 30px',
+                      background: loading || backendStatus === 'offline' ? '#9ca3af' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      color: 'white', borderRadius: '12px', 
+                      cursor: loading || backendStatus === 'offline' ? 'not-allowed' : 'pointer',
+                      fontWeight: '700', fontSize: '1.1rem', border: 'none', margin: '0 auto',
+                      transition: 'background-color 0.3s ease'
+                    }} className="detect-button">
+                    {loading ? (
+                      <>
+                        <Loader2 style={{ animation: 'spin 1s linear infinite' }} size={20} />
+                        Analyzing {images.length} image{images.length > 1 ? 's' : ''}...
+                      </>
+                    ) : backendStatus === 'offline' ? (
+                      <>
+                        <WifiOff size={20} />
+                        Server Offline - Cannot Analyze
+                      </>
+                    ) : (
+                      <>
+                        <Target size={20} />
+                        Detect Defects ({images.length} image{images.length > 1 ? 's' : ''})
+                      </>
+                    )}
+                  </button>
+                  {backendStatus === 'offline' && images.length > 0 && (
+                    <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '8px', textAlign: 'center' }}>
+                      The analysis server is currently unavailable. Please check the status above and try again.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Images Grid Display */}
+            {images.length > 0 && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                gap: '15px',
+                maxHeight: '500px',
+                overflowY: 'auto',
+                padding: '15px',
+                background: 'rgba(255, 255, 255, 0.1)',
+                borderRadius: '15px',
+                boxShadow: '0 4px 15px rgba(0,0,0,0.1)'
+              }} className="images-grid">
+                {images.map((image) => {
+                  const imageResult = results.find(r => r.image_id === image.id);
+                  return (
+                    <div key={image.id} style={{
+                      background: 'white',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
+                      cursor: 'pointer',
+                      transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                    }} className="image-card">
+                      <div style={{ padding: '12px', background: '#f8f9fa', borderBottom: '1px solid #e9ecef', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} className="image-card-header">
+                        <h4 style={{ margin: '0', fontSize: '0.85rem', fontWeight: '600', color: '#495057', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '160px' }}>
+                          {image.name}
+                        </h4>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} className="image-card-actions">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedImage(image);
+                            }}
+                            style={{
+                              background: '#e3f2fd',
+                              color: '#1976d2',
+                              border: 'none',
+                              borderRadius: '6px',
+                              padding: '4px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              transition: 'background-color 0.2s ease'
+                            }}
+                            title="View larger"
+                          >
+                            <ZoomIn size={14} />
+                          </button>
+                          <button onClick={(e) => {
+                            e.stopPropagation();
+                            removeImage(image.id);
+                          }} style={{
+                            background: '#f8d7da', color: '#721c24', border: 'none', borderRadius: '6px',
+                            padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center',
+                            transition: 'background-color 0.2s ease'
+                          }}>
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div 
+                        style={{ position: 'relative', height: '150px', overflow: 'hidden' }}
+                        onClick={() => setSelectedImage(image)}
+                      >
+                        <img
+                          ref={el => imageRefs.current[image.id] = el}
+                          src={image.src}
+                          alt={image.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                          onLoad={() => {
+                            setTimeout(() => {
+                              const imageElement = imageRefs.current[image.id];
+                              if (imageElement) {
+                                const event = new Event('load');
+                                imageElement.dispatchEvent(event);
+                              }
+                            }, 200);
+                          }}
+                        />
+                        
+                        {imageResult && imageResult.predictions && (
+                          <BoundingBoxOverlay
+                            imageId={image.id}
+                            predictions={imageResult.predictions}
+                            imageDimensions={imageResult.image_dimensions}
+                            isModal={false}
+                          />
+                        )}
+                        
+                        {imageResult && (
+                          <div style={{ 
+                            position: 'absolute', 
+                            top: '8px', 
+                            right: '8px',
+                            background: 'rgba(209, 236, 241, 0.9)', 
+                            color: '#0c5460', 
+                            padding: '4px 8px', 
+                            borderRadius: '12px', 
+                            fontSize: '0.75rem', 
+                            fontWeight: '600',
+                            backdropFilter: 'blur(4px)'
+                          }}>
+                            {imageResult.total_detections} defects
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Right Column - Summary & Results */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }} className="sidebar">
+            {/* Summary Statistics Card */}
+            <div style={{ 
+              background: 'rgba(255, 255, 255, 0.95)', 
+              borderRadius: '15px', 
+              padding: '20px', 
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)'
+            }} className="summary-card">
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 15px 0', fontSize: '1.1rem', fontWeight: '700' }}>
+                <BarChart3 size={18} />
+                Summary
+              </h3>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', borderRadius: '8px', fontWeight: '700' }}>
+                  <span>Total Images</span>
+                  <span>{summary.total_images_processed || 0}</span>
+                </div>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', borderRadius: '8px', fontWeight: '700' }}>
+                  <span>Total Defects</span>
+                  <span>{summary.total_defects_found || 0}</span>
+                </div>
+                
+                {/* Breakdown of defects by type */}
+                {Object.entries(getOverallStats()).map(([defect, count]) => (
+                  <div key={defect} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#f8f9fa', borderRadius: '6px', borderLeft: `4px solid ${defectColors[defect]}` }}>
+                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: defectColors[defect] }} />
+                    <span style={{ fontSize: '0.85rem', textTransform: 'capitalize' }}>{defect.replace('_', ' ')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Detection Results Card */}
+            <div style={{ 
+              background: 'rgba(255, 255, 255, 0.95)', 
+              borderRadius: '15px', 
+              padding: '20px', 
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)'
+            }} className="results-card">
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 15px 0', fontSize: '1.1rem', fontWeight: '700' }}>
+                <CheckCircle size={18} />
+                Results
+              </h3>
+
+              {results.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '30px 10px', color: '#6c757d' }} className="no-results-message">
+                  <Target size={40} style={{ opacity: '0.5', marginBottom: '10px' }} />
+                  <div style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '5px' }}>
+                    {loading ? 'Analyzing...' : 'No results yet'}
+                  </div>
+                  <p style={{ fontSize: '0.85rem', margin: '0', lineHeight: '1.4' }}>
+                    {loading ? 'Please wait while we process your images' : 'Upload images and click "Detect Defects"'}
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '400px', overflowY: 'auto' }} className="results-list">
+                  {results.map((result, index) => (
+                    <div key={result.image_id} style={{ border: '1px solid #e9ecef', borderRadius: '8px', padding: '12px' }} className="image-result-item">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: '600' }}>
+                          {images.find(img => img.id === result.image_id)?.name || `Image ${index + 1}`}
+                        </h4>
+                        <span style={{ background: '#d1ecf1', color: '#0c5460', padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '600' }}>
+                          {result.total_detections} defects
+                        </span>
+                      </div>
+                      
+                      {result.error ? (
+                        <div style={{ color: '#dc3545', fontSize: '0.85rem' }} className="error-text">{result.error}</div>
+                      ) : (
+                        result.predictions && result.predictions.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {/* Show top 5 detections, then a "+ more" link */}
+                            {result.predictions.slice(0, 5).map((detection, i) => (
+                              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', background: '#f8f9fa', borderRadius: '4px', borderLeft: `3px solid ${defectColors[detection.class]}` }}>
+                                <span style={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{detection.class?.replace('_', ' ')}</span>
+                                <span style={{ fontSize: '0.75rem', fontWeight: '600' }}>{(detection.confidence * 100).toFixed(0)}%</span>
+                              </div>
+                            ))}
+                            {result.predictions.length > 5 && (
+                              <div style={{ fontSize: '0.75rem', color: '#6c757d', textAlign: 'center' }}>
+                                +{result.predictions.length - 5} more
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '0.85rem', color: '#6c757d' }}>No defects detected.</div>
+                        )
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Defect Types Legend Card */}
+            <div style={{ 
+              background: 'rgba(255, 255, 255, 0.95)', 
+              borderRadius: '15px', 
+              padding: '15px', 
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)'
+            }} className="legend-card">
+              <h4 style={{ margin: '0 0 12px 0', fontSize: '1rem', fontWeight: '700' }}>Defect Types</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }} className="legend-grid">
+                {Object.entries(defectColors).map(([defect, color]) => (
+                  <div key={defect} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px', background: '#f8f9fa', borderRadius: '4px' }} className="legend-item">
+                    <div style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: color, flexShrink: 0 }} />
+                    <span style={{ fontSize: '0.75rem', color: '#495057', textTransform: 'capitalize' }}>
+                      {defect.replace('_', ' ')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Image Modal (rendered outside the main grid for full-screen overlay) */}
+        <ImageModal />
+      </div>
+
+      {/* Global Styles for Animations and Responsiveness */}
+      <style jsx>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.8; }
         }
         
         /* Hover effects for buttons and labels */
@@ -864,11 +1163,24 @@ ${(r.predictions || []).map(p =>
           box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
         }
         
+        /* Base styles for responsiveness */
+        .main-grid {
+          grid-template-columns: 1fr 350px; /* Default for larger screens */
+        }
+
+        .button-group {
+          flex-direction: row; /* Default for larger screens */
+          flex-wrap: wrap;
+        }
+
+        .legend-grid {
+          grid-template-columns: 1fr 1fr; /* Default for larger screens */
+        }
+
         /* Responsive adjustments for smaller screens */
         @media (max-width: 1200px) {
-          /* Change main grid to single column layout */
-          div[style*="gridTemplateColumns: 1fr 350px"] {
-            grid-template-columns: 1fr !important;
+          .main-grid {
+            grid-template-columns: 1fr !important; /* Single column layout for smaller desktops/tablets */
           }
         }
         
@@ -878,17 +1190,15 @@ ${(r.predictions || []).map(p =>
           }
           .app-header p {
             font-size: 1rem !important;
+            padding: 0 10px; /* Add some padding for text on small screens */
           }
-          div[style*="display: flex; gap: 12px; flex-wrap: wrap"] {
-            flex-direction: column !important; /* Stack buttons vertically */
+          .button-group {
+            flex-direction: column !important; /* Stack buttons vertically on mobile */
+            align-items: stretch !important; /* Stretch buttons to full width */
+            gap: 10px !important; /* Adjust gap for stacked items */
           }
-          .controls-section div {
-            flex-direction: column;
-            gap: 12px;
-          }
-          .controls-section button {
-            width: 100%;
-            display: flex; /* Ensure button content is centered */
+          .action-button, .checkbox-label {
+            width: 100%; /* Full width for buttons and labels */
             justify-content: center; /* Center content in buttons */
             padding: 12px 15px !important; /* Increase padding for better touch targets */
           }
