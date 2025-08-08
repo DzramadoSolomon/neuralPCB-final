@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Camera, AlertCircle, CheckCircle, Loader2, X, Zap, Eye, Target, BarChart3, Download, Plus, Image as ImageIcon, ZoomIn, FileText, WifiOff } from 'lucide-react';
+import { Camera, AlertCircle, CheckCircle, Loader2, X, Zap, Eye, Target, BarChart3, Download, Plus, Image as ImageIcon, ZoomIn, FileText } from 'lucide-react';
 
 // IMPORTANT: Update this API_URL to match your backend server's address
 const API_URL = 'http://13.51.242.26:8000';
@@ -549,7 +549,7 @@ ${(r.predictions || []).map(p =>
                   }`}
                 >
                   {backendStatus === 'online' && <CheckCircle className="w-4 h-4" />}
-                  {backendStatus === 'offline' && <WifiOff className="w-4 h-4" />}
+                  {backendStatus === 'offline' && <X className="w-4 h-4" />}
                   {backendStatus === 'unknown' && <Loader2 className="w-4 h-4 animate-spin" />}
                   <span>Server: {backendStatus.charAt(0).toUpperCase() + backendStatus.slice(1)}</span>
                 </div>
@@ -749,7 +749,7 @@ ${(r.predictions || []).map(p =>
                     <div className="font-semibold text-gray-500">Processing Time:</div>
                     <div className="text-right font-bold text-gray-800">
                       {processingTime} s
-                    </div>
+                    </p>
                   </>
                 )}
               </div>
