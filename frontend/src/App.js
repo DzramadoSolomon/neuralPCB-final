@@ -749,7 +749,7 @@ ${(r.predictions || []).map(p =>
                     <div className="font-semibold text-gray-500">Processing Time:</div>
                     <div className="text-right font-bold text-gray-800">
                       {processingTime} s
-                    </p>
+                    </div>
                   </>
                 )}
               </div>
