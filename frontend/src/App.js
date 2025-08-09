@@ -44,7 +44,7 @@ const PCBDefectDetector = () => {
 
  const checkBackendStatus = async () => {
     try {
-      const response = await fetch('http://13.51.242.26:8000/health', {
+      const response = await fetch('https://appropriate-accuracy-suffering-d.trycloudflare.com/health', {
         method: 'GET',
         mode: 'cors',
       });
@@ -170,7 +170,7 @@ const PCBDefectDetector = () => {
       let response;
       let requestBody;
 
-      const backendUrl = 'http://13.51.242.26:8000/predict';
+      const backendUrl = 'https://appropriate-accuracy-suffering-d.trycloudflare.com/predict';
 
       const hasCameraImages = images.some(img => img.type === 'camera');
 
