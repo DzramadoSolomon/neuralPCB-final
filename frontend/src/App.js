@@ -44,7 +44,7 @@ const PCBDefectDetector = () => {
 
  const checkBackendStatus = async () => {
     try {
-      const response = await fetch('https://refers-rest-disorder-junior.trycloudflare.com/health', {
+      const response = await fetch(' https://sensitive-delivers-peas-research.trycloudflare.com/health', {
         method: 'GET',
         mode: 'cors',
       });
@@ -170,7 +170,7 @@ const PCBDefectDetector = () => {
       let response;
       let requestBody;
 
-      const backendUrl = 'https://refers-rest-disorder-junior.trycloudflare.com/predict';
+      const backendUrl = ' https://sensitive-delivers-peas-research.trycloudflare.com/predict';
 
       const hasCameraImages = images.some(img => img.type === 'camera');
 
